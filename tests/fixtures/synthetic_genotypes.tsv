@@ -1,0 +1,5 @@
+# SYNTHETIC TEST DATA — not a real person
+marker_id	chromosome	position	genotype
+synthetic_marker_1	1	101	AG
+synthetic_marker_missing	2	202	--
+synthetic_marker_ref	3	303	CC

@@ -1,0 +1,3 @@
+# SYNTHETIC TEST DATA
+syntheticConflict	3	30	AA
+syntheticConflict	3	31	GG

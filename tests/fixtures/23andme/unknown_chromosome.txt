@@ -1,0 +1,2 @@
+# SYNTHETIC TEST DATA
+syntheticUnknown	vendor_contig	70	AC

@@ -1,0 +1,3 @@
+# SYNTHETIC TEST DATA
+syntheticSingle	Y	50	A
+syntheticOther	MT	60	DEL

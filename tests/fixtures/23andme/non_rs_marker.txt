@@ -1,0 +1,2 @@
+# SYNTHETIC TEST DATA
+vendor-internal-id	4	40	CT
