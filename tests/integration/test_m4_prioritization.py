@@ -16,6 +16,7 @@ from genome_evidence.prioritization.models import (
     CandidateEligibility,
     ClinicalPrioritizationConfig,
     GenotypeEvidenceState,
+    PrioritizationResult,
     ReviewPriorityBand,
 )
 
@@ -106,7 +107,7 @@ def _runs(tmp_path: Path) -> tuple[Path, Path, Path]:
     return tmp_path / "m2", tmp_path / "evidence", tmp_path / "annotation"
 
 
-def _prioritize(tmp_path: Path):
+def _prioritize(tmp_path: Path) -> PrioritizationResult:
     m2, evidence, annotation = _runs(tmp_path)
     result = prioritize_clinical_variants(
         m2,

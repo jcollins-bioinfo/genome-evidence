@@ -53,3 +53,7 @@ A review-priority band answers only which source-linked records an explicit poli
 ## Population-structure boundary (M5)
 
 An M2 canonical genotype is an observation-derived normalized representation. Model marker means, scales, and loadings are versioned external model metadata; reference subset labels are source-attributed external descriptors. PC coordinates and reference distances are model outputs, and support envelopes are empirical model-derived comparisons. A missing model marker remains missingness; discordant canonical calls remain unresolved evidence. Leave-one-chromosome-out results describe model/input marker-set sensitivity, not confidence intervals. No M5 quantity is an identified causal claim, mechanism, identity, diagnosis, risk, or ancestry percentage.
+
+## Statistical phasing and imputation boundary (M6)
+
+M2 observed allele multisets are immutable. Statistical phase has arbitrary haplotype labels and does not establish parent of origin. Imputed genotypes, ALT dosage, allele probabilities, and estimated quality are source-attributed model inferences conditional on the local panel, density, MAF, LD, tool, and configuration. Missing output is not 0/0. Internal masked-marker consistency is not external or clinical validation. M6 does not automatically feed evidence, prioritization, PRS, ancestry, family, or clinical analysis.
