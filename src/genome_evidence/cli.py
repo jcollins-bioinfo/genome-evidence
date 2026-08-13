@@ -14,6 +14,11 @@ from genome_evidence.evidence import (
 from genome_evidence.ingest import Ingest23andMeConfig, ParseMode, ingest_23andme
 from genome_evidence.ingest.errors import GenotypeParseError
 from genome_evidence.normalization import NormalizationConfig, normalize_m1_run
+from genome_evidence.population_structure import (
+    PopulationStructureConfig,
+    infer_population_structure,
+    validate_population_reference,
+)
 from genome_evidence.prioritization import prioritize_clinical_variants
 from genome_evidence.prioritization.models import AnalysisContext, ClinicalPrioritizationConfig
 
@@ -26,6 +31,61 @@ evidence_app = typer.Typer(
 app.add_typer(evidence_app, name="evidence")
 prioritize_app = typer.Typer(help="Create transparent manual-review queues.", no_args_is_help=True)
 app.add_typer(prioritize_app, name="prioritize")
+ancestry_app = typer.Typer(
+    help="Reference-panel population-structure projection.", no_args_is_help=True
+)
+app.add_typer(ancestry_app, name="ancestry")
+
+
+@ancestry_app.command("validate-reference")
+def ancestry_validate_reference(
+    reference_bundle: Annotated[
+        Path, typer.Option("--reference-bundle", exists=True, file_okay=False)
+    ],
+) -> None:
+    """Validate one local, checksummed population reference bundle."""
+    try:
+        result = validate_population_reference(reference_bundle)
+    except (ValueError, OSError) as error:
+        typer.echo(f"Reference validation failed: {error}", err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo(f"Reference valid: {result.identity.model_id} {result.identity.model_version}")
+    typer.echo(
+        f"Markers: {len(result.variants)}; reference samples: {len(result.reference_scores)}"
+    )
+
+
+@ancestry_app.command("project")
+def ancestry_project(
+    normalization_run: Annotated[
+        Path, typer.Option("--normalization-run", exists=True, file_okay=False)
+    ],
+    reference_bundle: Annotated[
+        Path, typer.Option("--reference-bundle", exists=True, file_okay=False)
+    ],
+    output: Annotated[Path, typer.Option("--output", file_okay=False)],
+    components: Annotated[int | None, typer.Option("--components", min=1)] = None,
+    neighbors: Annotated[int, typer.Option("--neighbors", min=1)] = 10,
+) -> None:
+    """Project one validated M2 analysis unit into a fixed local PCA space."""
+    try:
+        result = infer_population_structure(
+            normalization_run,
+            reference_bundle,
+            output,
+            PopulationStructureConfig(component_count=components, nearest_neighbor_count=neighbors),
+        )
+    except (ValueError, FileExistsError, OSError) as error:
+        typer.echo(f"Population-structure projection failed: {error}", err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo(f"Projection status: {result.projection_status}")
+    typer.echo(f"Support status: {result.support_status}")
+    typer.echo(f"Used markers: {result.diagnostic.used_marker_count}")
+    typer.echo(f"Output: {result.output_directory}")
+    typer.echo(f"Run ID: {result.run_id}")
+    typer.echo(
+        f"Reference: {result.reference_identity.model_id} {result.reference_identity.model_version}"
+    )
 
 
 @app.command()

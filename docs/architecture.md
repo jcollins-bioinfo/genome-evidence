@@ -40,3 +40,7 @@ The offline ClinVar adapter streams a checksummed VCV XML snapshot into typed so
 ## M4 implementation
 
 Prioritization consumes three mutually consistent, checksum-validated upstream manifests and a local typed policy. It builds a profile for every exact-linked M2 variant, computes genotype evidence without voting discordant rows, and writes atomic Parquet/JSON/Markdown artifacts. Structured candidate-to-assertion and rationale tables preserve every routing input. Runtime identity is distinct from deterministic scientific record identity.
+
+## M5 implementation
+
+Population structure consumes only checksum-valid M2 artifacts and a local strict PCA reference bundle. Exact allele alignment, partial-marker least squares, numerical gates, model-dependent distances/support, and marker-set sensitivity remain a separate non-clinical model-output layer.

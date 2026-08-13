@@ -10,7 +10,7 @@ An assay observation is not an inference. Measured genotypes, canonical alleles,
 
 ## Status
 
-Milestones **M1–M2** are implemented. M3 and M4 code are present; locked dependency and independent CI verification remain blocked until dependency resolution is available. M4 creates only a manual-review queue, never an automatic classification. M5 and later milestones remain unimplemented.
+Milestones **M1–M4** are implemented and verified by the locked CI run for the M4 hardening merge. M4 creates only a manual-review queue, never an automatic classification. M5 reference-panel population-structure projection infrastructure and a synthetic demonstration are implemented; no production reference bundle is shipped. M6 and later milestones remain unimplemented.
 
 ## Install and use
 
@@ -24,6 +24,8 @@ uv run genome-evidence ingest 23andme --input /private/input.txt --output /priva
 uv run genome-evidence normalize --input /private/m1-run --output /private/m2-run --marker-definitions /references/markers.json --target-reference /references/GRCh38.fa
 uv run genome-evidence evidence ingest-clinvar --input /references/fixed-vcv.xml.gz --output /private/evidence-run
 uv run genome-evidence evidence link --normalization-run /private/m2-run --evidence-run /private/evidence-run --output /private/annotation-run
+uv run genome-evidence ancestry validate-reference --reference-bundle /references/population-model
+uv run genome-evidence ancestry project --normalization-run /private/m2-run --reference-bundle /references/population-model --output /private/m5-run
 uv run genome-evidence prioritize clinical --normalization-run /private/m2-run --evidence-run /private/evidence-run --annotation-run /private/annotation-run --policy references/clinvar-germline-review-policy-v1.json --analysis-context germline_constitutional --output /private/m4-run
 ```
 
@@ -46,3 +48,12 @@ Never commit personal genomic, phenotype, clinical, or derived report data. Only
 ## Roadmap
 
 The staged plan runs from source ingestion and canonical normalization through versioned evidence, family and phenotype integration, and eventually WGS ingestion. Later milestones must not weaken the epistemic contract. See the [roadmap](docs/roadmap.md) and [architecture](docs/architecture.md).
+
+## Notebooks
+
+The [canonical notebook index](notebooks/README.md) documents chronology. The locked local environment and nbmake CI are verified; Colab is a launch convenience that may require checkout/setup and does not reproduce the lock automatically.
+
+- [01 ingestion/normalization](notebooks/01_ingest_and_normalize_synthetic_genome.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jcollins-bioinfo/genome-evidence/blob/main/notebooks/01_ingest_and_normalize_synthetic_genome.ipynb)
+- [02 external evidence](notebooks/02_versioned_external_evidence.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jcollins-bioinfo/genome-evidence/blob/main/notebooks/02_versioned_external_evidence.ipynb)
+- [03 clinical review](notebooks/03_evidence_oriented_clinical_review.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jcollins-bioinfo/genome-evidence/blob/main/notebooks/03_evidence_oriented_clinical_review.ipynb)
+- [04 population structure](notebooks/04_population_structure_projection.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jcollins-bioinfo/genome-evidence/blob/main/notebooks/04_population_structure_projection.ipynb)

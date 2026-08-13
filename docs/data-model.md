@@ -30,3 +30,7 @@ DuckDB is the initial analytical source of truth, backed where practical by immu
 ## M4 review-routing records
 
 `VariantEvidenceProfile` joins exact-linked source evidence to a canonical variant while preserving genotype state, SCV/VCV assertions, classification dimensions, terms, conditions, and unresolved assessments. `ClinicalReviewCandidate` carries a non-clinical review band and explicit eligibility. `CandidateAssertionLink`, `PriorityRationale`, and `PrioritizationExclusion` normalize traceability; `PolicyIdentity` captures exact policy bytes and canonical parsed configuration.
+
+## M5 model outputs
+
+`MarkerAlignment` retains every model marker and its exact used, missing, excluded, or discordant state. `ProjectionCoordinate`, `ReferenceGroupDistance`, `ReferenceNeighbor`, and `ReferenceSupportEvaluation` are bundle-dependent model outputs. `ProjectionSensitivityReplicate` records deterministic leave-one-chromosome-out sensitivity.
