@@ -49,3 +49,7 @@ An SCV submission is distinct from a source-computed VCV aggregate. Exact source
 ## Manual-review prioritization boundary (M4)
 
 A review-priority band answers only which source-linked records an explicit policy routes for earlier human inspection. Exact source terms, SCV/VCV level, classification dimension, and record status remain attributed. Exact linkage does not establish ALT observation; reference-only, missing canonical genotype, and discordant called rows remain distinct. No band is a project classification, diagnosis, probability, urgency, penetrance, confidence, or actionability claim, and absence is not a negative test.
+
+## Population-structure boundary (M5)
+
+An M2 canonical genotype is an observation-derived normalized representation. Model marker means, scales, and loadings are versioned external model metadata; reference subset labels are source-attributed external descriptors. PC coordinates and reference distances are model outputs, and support envelopes are empirical model-derived comparisons. A missing model marker remains missingness; discordant canonical calls remain unresolved evidence. Leave-one-chromosome-out results describe model/input marker-set sensitivity, not confidence intervals. No M5 quantity is an identified causal claim, mechanism, identity, diagnosis, risk, or ancestry percentage.
