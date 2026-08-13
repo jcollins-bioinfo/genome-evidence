@@ -14,6 +14,8 @@ from genome_evidence.evidence import (
 from genome_evidence.ingest import Ingest23andMeConfig, ParseMode, ingest_23andme
 from genome_evidence.ingest.errors import GenotypeParseError
 from genome_evidence.normalization import NormalizationConfig, normalize_m1_run
+from genome_evidence.prioritization import prioritize_clinical_variants
+from genome_evidence.prioritization.models import AnalysisContext, ClinicalPrioritizationConfig
 
 app = typer.Typer(help="Genome Evidence utilities.", no_args_is_help=True)
 ingest_app = typer.Typer(help="Ingest source-faithful observations.", no_args_is_help=True)
@@ -22,6 +24,8 @@ evidence_app = typer.Typer(
     help="Ingest and link versioned external assertions.", no_args_is_help=True
 )
 app.add_typer(evidence_app, name="evidence")
+prioritize_app = typer.Typer(help="Create transparent manual-review queues.", no_args_is_help=True)
+app.add_typer(prioritize_app, name="prioritize")
 
 
 @app.command()
@@ -141,6 +145,41 @@ def evidence_link(
         raise typer.Exit(code=2) from error
     matched = sum(link.outcome.value == "matched" for link in result.links)
     typer.echo(f"Evidence linking complete: {len(result.links)} representations; {matched} matched")
+    typer.echo(f"Run ID: {result.run_id}")
+
+
+@prioritize_app.command("clinical")
+def prioritize_clinical(
+    normalization_run: Annotated[
+        Path, typer.Option("--normalization-run", exists=True, file_okay=False)
+    ],
+    evidence_run: Annotated[Path, typer.Option("--evidence-run", exists=True, file_okay=False)],
+    annotation_run: Annotated[Path, typer.Option("--annotation-run", exists=True, file_okay=False)],
+    policy: Annotated[Path, typer.Option("--policy", exists=True, dir_okay=False)],
+    analysis_context: Annotated[AnalysisContext, typer.Option("--analysis-context")],
+    output: Annotated[Path, typer.Option("--output", file_okay=False)],
+) -> None:
+    """Route source-linked records for manual review using only local inputs."""
+    try:
+        result = prioritize_clinical_variants(
+            normalization_run,
+            evidence_run,
+            annotation_run,
+            output,
+            ClinicalPrioritizationConfig(policy_path=policy, analysis_context=analysis_context),
+        )
+    except (ValueError, FileExistsError, OSError) as error:
+        typer.echo(f"Prioritization failed: {error}", err=True)
+        raise typer.Exit(code=2) from error
+    counts: dict[str, int] = {}
+    for candidate in result.candidates:
+        counts[candidate.priority_band.value] = counts.get(candidate.priority_band.value, 0) + 1
+    typer.echo(
+        f"Prioritization complete: {len(result.profiles)} profiles; "
+        f"{len(result.candidates)} candidates"
+    )
+    typer.echo("Bands: " + ", ".join(f"{key}={value}" for key, value in sorted(counts.items())))
+    typer.echo(f"Output: {result.output_directory}")
     typer.echo(f"Run ID: {result.run_id}")
 
 

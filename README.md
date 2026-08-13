@@ -10,7 +10,7 @@ An assay observation is not an inference. Measured genotypes, canonical alleles,
 
 ## Status
 
-Milestones **M1–M2** are verified as implemented. M3 external assertion ingestion and exact linking are present but remain pending reproducible locked-dependency validation. Interpretation, conflict resolution, imputation, scoring, reference downloads, and biological analysis remain unimplemented; M4 is explicitly not implemented.
+Milestones **M1–M2** are implemented. M3 and M4 code are present; locked dependency and independent CI verification remain blocked until dependency resolution is available. M4 creates only a manual-review queue, never an automatic classification. M5 and later milestones remain unimplemented.
 
 ## Install and use
 
@@ -24,6 +24,7 @@ uv run genome-evidence ingest 23andme --input /private/input.txt --output /priva
 uv run genome-evidence normalize --input /private/m1-run --output /private/m2-run --marker-definitions /references/markers.json --target-reference /references/GRCh38.fa
 uv run genome-evidence evidence ingest-clinvar --input /references/fixed-vcv.xml.gz --output /private/evidence-run
 uv run genome-evidence evidence link --normalization-run /private/m2-run --evidence-run /private/evidence-run --output /private/annotation-run
+uv run genome-evidence prioritize clinical --normalization-run /private/m2-run --evidence-run /private/evidence-run --annotation-run /private/annotation-run --policy references/clinvar-germline-review-policy-v1.json --analysis-context germline_constitutional --output /private/m4-run
 ```
 
 `doctor` checks only the local runtime and configuration; it does not inspect genotype data. The ingestion CLI is a thin wrapper over `ingest_23andme`; see [the M1 ingestion guide](docs/ingestion/23andme.md) and [assay-QC definitions](docs/qc/assay-level-qc.md).

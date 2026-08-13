@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "policy_id": "clinvar-germline-review-routing",
+  "version": "1.0.0",
+  "supported_analysis_context": "germline_constitutional",
+  "source_namespace": "NCBI ClinVar",
+  "dataset": "VCV_XML",
+  "classification_type_handling": {
+    "germline": "route",
+    "somatic_clinical_impact": "context_only",
+    "oncogenicity": "context_only",
+    "unknown": "context_only"
+  },
+  "term_routes": {
+    "high_attention_source_term": ["Pathogenic", "Likely pathogenic", "Pathogenic/Likely pathogenic", "Pathogenic, low penetrance", "Likely pathogenic, low penetrance"],
+    "risk_context": ["Established risk allele", "Likely risk allele", "Uncertain risk allele"],
+    "uncertain": ["Uncertain significance", "Variant of uncertain significance", "Uncertain clinical significance"],
+    "benign_like": ["Benign", "Likely benign", "Benign/Likely benign"],
+    "other_context": ["affects", "association", "drug response", "confers sensitivity", "protective", "other", "not provided"],
+    "unmapped_source_term": []
+  },
+  "source_review_status_mappings": {
+    "practice guideline": "practice_guideline",
+    "reviewed by expert panel": "expert_panel",
+    "criteria provided, multiple submitters, no conflicts": "multiple_submitters",
+    "criteria provided, single submitter": "single_submitter",
+    "no assertion criteria provided": "no_assertion_criteria"
+  },
+  "record_status_behavior": {"current": "active", "replaced": "inactive", "deleted": "inactive", "unknown": "active"},
+  "priority_rules": [
+    {"rule_id": "active-high-attention", "version": "1", "band": "review_first"},
+    {"rule_id": "active-review-context", "version": "1", "band": "review_next"},
+    {"rule_id": "benign-only", "version": "1", "band": "not_prioritized"},
+    {"rule_id": "context-only", "version": "1", "band": "context_only"},
+    {"rule_id": "genotype-ineligible", "version": "1", "band": "not_eligible"}
+  ],
+  "freshness_warning_days": 1825,
+  "tie_breaking": ["priority_band", "source_review_status_contextual", "source_reported_conflict", "evaluation_date_missing", "evidence_age_days", "profile_id"]
+}
