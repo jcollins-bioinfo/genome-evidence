@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Variant(BaseModel):
@@ -16,3 +16,9 @@ class Variant(BaseModel):
     @classmethod
     def normalize_allele_case(cls, value: str) -> str:
         return value.upper()
+
+    @model_validator(mode="after")
+    def distinct_alleles(self) -> "Variant":
+        if self.reference == self.alternate:
+            raise ValueError("canonical REF and ALT must differ")
+        return self

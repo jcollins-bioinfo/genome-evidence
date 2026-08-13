@@ -15,6 +15,10 @@ Missingness is encoded through observation call status with absent alleles. It i
 
 DuckDB is the initial analytical source of truth, backed where practical by immutable/versioned Parquet artifacts and source checksums. Database state should be reconstructible from source and derived artifacts. Pydantic validation protects API boundaries; database constraints and schemas will mature with ingestion milestones.
 
+## M2 derived records
+
+`ObservationMapping` links a deterministic M1 observation reference and normalization run to an optional canonical target, explicit status/reason, strand action, liftover state/candidates, allele correspondence, and REF validation. `CanonicalGenotype` exists only for defensible called alleles and preserves haploid/diploid ploidy. `ResourceIdentity` records local resource provenance. These types bridge rather than populate the older M0 `GenotypeObservation`, whose fields M1 cannot justify.
+
 ## M1 source records
 
 `RawGenotypeObservation` is an immutable pre-normalization record containing the unchanged marker, chromosome and genotype tokens, positive source position, source line, pseudonymous sample, run ID, call state, and explicitly lexical categories. It intentionally has no REF, ALT, canonical genotype, annotation, dosage, or interpretation fields. `SourceMetadata` retains exact-file hash/size, comments, explicit versus overridden build provenance, counts, parser/package version, timestamp, and run. `AssayQCSummary` and `QCFinding` provide aggregate and record-referenced descriptive QC.
