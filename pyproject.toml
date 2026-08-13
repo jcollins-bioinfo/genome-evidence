@@ -11,6 +11,9 @@ requires-python = ">=3.12"
 license = { text = "MIT" }
 dependencies = ["duckdb>=1.2", "numpy>=2.1", "polars>=1.20", "pydantic>=2.10", "typer>=0.15"]
 
+[project.optional-dependencies]
+notebook = ["ipykernel>=6.29", "jupyter>=1.1"]
+
 [project.scripts]
 genome-evidence = "genome_evidence.cli:app"
 

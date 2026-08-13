@@ -21,6 +21,11 @@ from genome_evidence.phasing_imputation import (
     validate_beagle,
     validate_phasing_reference,
 )
+from genome_evidence.polygenic_scoring import (
+    ScoreConfig,
+    calculate_polygenic_scores,
+    validate_polygenic_score_bundle,
+)
 from genome_evidence.population_structure import (
     PopulationStructureConfig,
     infer_population_structure,
@@ -55,6 +60,45 @@ phasing_app = typer.Typer(
     help="Validate and run offline statistical phasing/imputation.", no_args_is_help=True
 )
 app.add_typer(phasing_app, name="phasing")
+pgs_app = typer.Typer(
+    help="Validate and calculate selected local polygenic scores.", no_args_is_help=True
+)
+app.add_typer(pgs_app, name="pgs")
+
+
+@pgs_app.command("validate-bundle")
+def pgs_validate_bundle(
+    bundle: Annotated[Path, typer.Option("--bundle", exists=True, file_okay=False)],
+) -> None:
+    """Validate a complete local PGS bundle without target data or network access."""
+    try:
+        result = validate_polygenic_score_bundle(bundle)
+    except (ValueError, OSError) as error:
+        typer.echo(f"PGS bundle validation failed: {error}", err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo(f"PGS bundle valid: {result.bundle_id}; models: {len(result.model_ids)}")
+
+
+@pgs_app.command("score")
+def pgs_score(
+    normalization_run: Annotated[
+        Path, typer.Option("--normalization-run", exists=True, file_okay=False)
+    ],
+    bundle: Annotated[Path, typer.Option("--bundle", exists=True, file_okay=False)],
+    output: Annotated[Path, typer.Option("--output", file_okay=False)],
+    pgs_id: Annotated[list[str], typer.Option("--pgs-id")],
+) -> None:
+    """Calculate explicitly selected PGS models offline; never fetch resources."""
+    try:
+        result = calculate_polygenic_scores(
+            normalization_run, bundle, output, ScoreConfig(pgs_ids=tuple(pgs_id))
+        )
+    except (ValueError, FileExistsError, OSError) as error:
+        typer.echo(f"PGS scoring failed: {error}", err=True)
+        raise typer.Exit(code=2) from error
+    for model, status in result.statuses.items():
+        typer.echo(f"{model}: {status.value}")
+    typer.echo(f"Run ID: {result.run_id}")
 
 
 @workspace_app.command("init")

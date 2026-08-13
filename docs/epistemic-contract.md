@@ -57,3 +57,8 @@ An M2 canonical genotype is an observation-derived normalized representation. Mo
 ## Statistical phasing and imputation boundary (M6)
 
 M2 observed allele multisets are immutable. Statistical phase has arbitrary haplotype labels and does not establish parent of origin. Imputed genotypes, ALT dosage, allele probabilities, and estimated quality are source-attributed model inferences conditional on the local panel, density, MAF, LD, tool, and configuration. Missing output is not 0/0. Internal masked-marker consistency is not external or clinical validation. M6 does not automatically feed evidence, prioritization, PRS, ancestry, family, or clinical analysis.
+
+
+## Polygenic-score boundary (M7)
+
+A score is an identified model output, not an observation. Exact observed M2 allele counts and optional validated M6 dosages remain distinguishishable inputs. Missing markers remain missing and partial sums are not complete published scores absent an explicit validated policy. Raw scores are not probabilities, diagnoses, absolute risks, treatment advice, or portable percentiles; reference context requires an exact compatible, explicitly selected distribution.
