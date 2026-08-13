@@ -4,14 +4,14 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from genome_evidence.ingest import Ingest23andMeConfig, ParseMode, ingest_23andme
+from genome_evidence.ingest import Ingest23andMeConfig, IngestionResult, ParseMode, ingest_23andme
 from genome_evidence.ingest.errors import GenotypeParseError
 from genome_evidence.qc.models import BuildProvenance, CallState, LexicalGenotypeCategory
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "23andme"
 
 
-def ingest(name: str, tmp_path: Path, **config: object):
+def ingest(name: str, tmp_path: Path, **config: object) -> IngestionResult:
     return ingest_23andme(FIXTURES / name, tmp_path / "run", Ingest23andMeConfig(**config))
 
 
@@ -151,4 +151,4 @@ def test_empty_source_has_defined_call_rate(tmp_path: Path) -> None:
 def test_source_observation_is_immutable(tmp_path: Path) -> None:
     record = ingest("normal.txt", tmp_path).observations[0]
     with pytest.raises(ValidationError):
-        record.raw_genotype = "TT"
+        record.raw_genotype = "TT"  # type: ignore[misc]

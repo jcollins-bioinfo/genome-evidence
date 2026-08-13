@@ -34,3 +34,7 @@ DuckDB is the initial analytical source of truth, backed where practical by immu
 ## M5 model outputs
 
 `MarkerAlignment` retains every model marker and its exact used, missing, excluded, or discordant state. `ProjectionCoordinate`, `ReferenceGroupDistance`, `ReferenceNeighbor`, and `ReferenceSupportEvaluation` are bundle-dependent model outputs. `ProjectionSensitivityReplicate` records deterministic leave-one-chromosome-out sensitivity.
+
+## M6 inference records
+
+M6 keeps target alignments/exclusions, observed statistical phase inference, imputed genotype inference, official variant quality, masked internal-consistency rows, and chromosome state/checkpoint rows as distinct typed artifacts. Every scientific identifier is content/lineage derived. Official fields retain ALT orientation and header-declared Number/Type semantics. Zero-row tables still have explicit schemas.

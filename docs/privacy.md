@@ -11,3 +11,5 @@ M1 never copies the raw input into its output directory and normal CLI output om
 M4 profiles, candidate tables, rationales, exclusions, and reports are private derived genomic artifacts. The CLI applies the same outside-worktree-or-Git-ignored output guard and prints aggregate counts only. Candidate terms, genotypes, conditions, and accessions must not be emitted to normal logs.
 
 M5 alignments, coordinates, distances, neighbors, support evaluations, sensitivity records, and reports are private derived genomic artifacts. CLI output is aggregate-only; reference validation and projection never download data.
+
+Private workspaces must remain outside Git. Personal sources, reference genotypes, native VCFs, engine logs, caches, JARs, and executed notebook outputs are not repository material. M6 analysis is offline and aggregate-only; public acquisition cannot inspect target directories. Colab is a Google-managed VM and is not appropriate when cloud processing is unacceptable.

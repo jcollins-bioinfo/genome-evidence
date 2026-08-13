@@ -40,3 +40,9 @@ build/
 *.egg-info/
 .coverage
 /runs/private/
+
+# Private workspace roots and phasing engines/reference artifacts
+/genome-evidence-private/
+*.jar
+*.bref3
+*.tbi

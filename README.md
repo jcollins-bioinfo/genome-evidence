@@ -10,7 +10,7 @@ An assay observation is not an inference. Measured genotypes, canonical alleles,
 
 ## Status
 
-Milestones **M1–M4** are implemented and verified by the locked CI run for the M4 hardening merge. M4 creates only a manual-review queue, never an automatic classification. M5 reference-panel population-structure projection infrastructure and a synthetic demonstration are implemented; no production reference bundle is shipped. M6 and later milestones remain unimplemented.
+Milestones **M1–M4** are implemented and verified by the locked CI run for the M4 hardening merge. M4 creates only a manual-review queue, never an automatic classification. M5 reference-panel population-structure projection infrastructure and a synthetic demonstration are implemented; no production reference bundle is shipped. M6 workspace and validation infrastructure is implemented but deliberately incomplete pending the mandatory real-Beagle fabricated-panel smoke; no production resources are shipped or claimed installed.
 
 ## Install and use
 
@@ -51,9 +51,11 @@ The staged plan runs from source ingestion and canonical normalization through v
 
 ## Notebooks
 
-The [canonical notebook index](notebooks/README.md) documents chronology. The locked local environment and nbmake CI are verified; Colab is a launch convenience that may require checkout/setup and does not reproduce the lock automatically.
+The [canonical notebook index](notebooks/README.md) lists all six independent notebooks. Each badge opens but does not auto-run, mount Drive, grant access, create folders, or guarantee the lockfile environment.
 
-- [01 ingestion/normalization](notebooks/01_ingest_and_normalize_synthetic_genome.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jcollins-bioinfo/genome-evidence/blob/main/notebooks/01_ingest_and_normalize_synthetic_genome.ipynb)
-- [02 external evidence](notebooks/02_versioned_external_evidence.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jcollins-bioinfo/genome-evidence/blob/main/notebooks/02_versioned_external_evidence.ipynb)
-- [03 clinical review](notebooks/03_evidence_oriented_clinical_review.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jcollins-bioinfo/genome-evidence/blob/main/notebooks/03_evidence_oriented_clinical_review.ipynb)
-- [04 population structure](notebooks/04_population_structure_projection.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jcollins-bioinfo/genome-evidence/blob/main/notebooks/04_population_structure_projection.ipynb)
+- [00 initialize private workspace](notebooks/00_initialize_private_workspace.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jcollins-bioinfo/genome-evidence/blob/main/notebooks/00_initialize_private_workspace.ipynb)
+- [01 ingest and normalize genome](notebooks/01_ingest_and_normalize_genome.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jcollins-bioinfo/genome-evidence/blob/main/notebooks/01_ingest_and_normalize_genome.ipynb)
+- [02 versioned external evidence](notebooks/02_versioned_external_evidence.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jcollins-bioinfo/genome-evidence/blob/main/notebooks/02_versioned_external_evidence.ipynb)
+- [03 evidence-oriented clinical review](notebooks/03_evidence_oriented_clinical_review.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jcollins-bioinfo/genome-evidence/blob/main/notebooks/03_evidence_oriented_clinical_review.ipynb)
+- [04 population structure projection](notebooks/04_population_structure_projection.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jcollins-bioinfo/genome-evidence/blob/main/notebooks/04_population_structure_projection.ipynb)
+- [05 reference-panel phasing and imputation](notebooks/05_reference_panel_phasing_and_imputation.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jcollins-bioinfo/genome-evidence/blob/main/notebooks/05_reference_panel_phasing_and_imputation.ipynb)

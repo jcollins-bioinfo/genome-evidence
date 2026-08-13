@@ -14,6 +14,13 @@ from genome_evidence.evidence import (
 from genome_evidence.ingest import Ingest23andMeConfig, ParseMode, ingest_23andme
 from genome_evidence.ingest.errors import GenotypeParseError
 from genome_evidence.normalization import NormalizationConfig, normalize_m1_run
+from genome_evidence.phasing_imputation import (
+    BeagleEngine,
+    M6Config,
+    phase_and_impute,
+    validate_beagle,
+    validate_phasing_reference,
+)
 from genome_evidence.population_structure import (
     PopulationStructureConfig,
     infer_population_structure,
@@ -21,6 +28,13 @@ from genome_evidence.population_structure import (
 )
 from genome_evidence.prioritization import prioritize_clinical_variants
 from genome_evidence.prioritization.models import AnalysisContext, ClinicalPrioritizationConfig
+from genome_evidence.workspace import (
+    WorkspaceConfig,
+    import_23andme_source,
+    initialize_workspace,
+    list_completed_runs,
+    validate_workspace,
+)
 
 app = typer.Typer(help="Genome Evidence utilities.", no_args_is_help=True)
 ingest_app = typer.Typer(help="Ingest source-faithful observations.", no_args_is_help=True)
@@ -35,6 +49,128 @@ ancestry_app = typer.Typer(
     help="Reference-panel population-structure projection.", no_args_is_help=True
 )
 app.add_typer(ancestry_app, name="ancestry")
+workspace_app = typer.Typer(help="Manage a private path-based workspace.", no_args_is_help=True)
+app.add_typer(workspace_app, name="workspace")
+phasing_app = typer.Typer(
+    help="Validate and run offline statistical phasing/imputation.", no_args_is_help=True
+)
+app.add_typer(phasing_app, name="phasing")
+
+
+@workspace_app.command("init")
+def workspace_init(
+    root: Annotated[Path, typer.Option("--root")],
+    subject_id: Annotated[str, typer.Option("--subject-id")] = "subject-0001",
+) -> None:
+    """Idempotently initialize the canonical private workspace."""
+    try:
+        initialize_workspace(root, WorkspaceConfig(subject_id=subject_id))
+    except (ValueError, OSError) as error:
+        typer.echo(f"Workspace initialization failed: {error}", err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo(f"Workspace valid: {root}")
+
+
+@workspace_app.command("doctor")
+def workspace_doctor(root: Annotated[Path, typer.Option("--root")]) -> None:
+    """Validate structure and configuration without reading genotype rows."""
+    try:
+        validate_workspace(root)
+    except (ValueError, OSError) as error:
+        typer.echo(f"Workspace validation failed: {error}", err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo("Workspace valid")
+
+
+@workspace_app.command("import-23andme")
+def workspace_import(
+    root: Annotated[Path, typer.Option("--root")],
+    file: Annotated[Path | None, typer.Option("--file")] = None,
+) -> None:
+    """Content-address one selected inbox file without logging its original name."""
+    try:
+        config = WorkspaceConfig.model_validate_json((root / "config/workspace.json").read_bytes())
+        imported = import_23andme_source(root, file, config.subject_id)
+    except (ValueError, OSError) as error:
+        typer.echo(f"Workspace import failed: {error}", err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo(f"Private source imported: {imported.relative_to(root)}")
+
+
+@workspace_app.command("list-runs")
+def workspace_list_runs(
+    root: Annotated[Path, typer.Option("--root")],
+    milestone: Annotated[str | None, typer.Option("--milestone")] = None,
+) -> None:
+    """List aggregate run identities and workspace-relative paths."""
+    try:
+        rows = list_completed_runs(root, milestone)
+    except (ValueError, OSError) as error:
+        typer.echo(f"Workspace registry failed: {error}", err=True)
+        raise typer.Exit(code=2) from error
+    for row in rows:
+        typer.echo(f"{row['milestone']} {row['run_id']} {row['path']}")
+
+
+@phasing_app.command("validate-reference")
+def phasing_validate_reference(
+    reference_bundle: Annotated[
+        Path, typer.Option("--reference-bundle", exists=True, file_okay=False)
+    ],
+) -> None:
+    """Validate a complete, local and checksummed M6 reference bundle."""
+    try:
+        result = validate_phasing_reference(reference_bundle)
+    except (ValueError, OSError) as error:
+        typer.echo(f"Reference validation failed: {error}", err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo(
+        f"Reference valid: {result.manifest.bundle_id}; "
+        f"chromosomes: {len(result.manifest.chromosomes)}"
+    )
+
+
+@phasing_app.command("validate-tool")
+def phasing_validate_tool(
+    jar: Annotated[Path, typer.Option("--jar", exists=True, dir_okay=False)],
+    sha256: Annotated[str, typer.Option("--sha256")],
+    byte_size: Annotated[int, typer.Option("--byte-size")],
+) -> None:
+    """Validate the pinned local Beagle identity before analysis."""
+    try:
+        identity = validate_beagle(BeagleEngine(jar=jar, sha256=sha256, byte_size=byte_size))
+    except (ValueError, OSError) as error:
+        typer.echo(f"Tool validation failed: {error}", err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo(f"Tool valid: {identity}")
+
+
+@phasing_app.command("run")
+def phasing_run(
+    normalization_run: Annotated[
+        Path, typer.Option("--normalization-run", exists=True, file_okay=False)
+    ],
+    reference_bundle: Annotated[
+        Path, typer.Option("--reference-bundle", exists=True, file_okay=False)
+    ],
+    jar: Annotated[Path, typer.Option("--jar", exists=True, dir_okay=False)],
+    output: Annotated[Path, typer.Option("--output")],
+    sha256: Annotated[str, typer.Option("--sha256")],
+    byte_size: Annotated[int, typer.Option("--byte-size")],
+    chromosomes: Annotated[str, typer.Option("--chromosomes")] = "22",
+) -> None:
+    """Run local-only M6; genotypes are never accepted on the command line."""
+    try:
+        phase_and_impute(
+            normalization_run,
+            reference_bundle,
+            BeagleEngine(jar=jar, sha256=sha256, byte_size=byte_size),
+            output,
+            M6Config(chromosomes=tuple(chromosomes.split(","))),
+        )
+    except (ValueError, FileExistsError, RuntimeError, OSError) as error:
+        typer.echo(f"Phasing/imputation failed: {error}", err=True)
+        raise typer.Exit(code=2) from error
 
 
 @ancestry_app.command("validate-reference")

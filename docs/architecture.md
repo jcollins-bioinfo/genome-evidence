@@ -44,3 +44,7 @@ Prioritization consumes three mutually consistent, checksum-validated upstream m
 ## M5 implementation
 
 Population structure consumes only checksum-valid M2 artifacts and a local strict PCA reference bundle. Exact allele alignment, partial-marker least squares, numerical gates, model-dependent distances/support, and marker-set sensitivity remain a separate non-clinical model-output layer.
+
+## Private workspace and M6 boundary
+
+The `workspace` package owns provider-neutral durable paths, content-addressed source import, and relative JSON run registries. M6 consumes validated M2 directly through a local-only engine adapter and source-agnostic checked reference contract. Its phase and imputation tables are inference stores, never observation stores or automatic downstream inputs. Publication uses copy, destination re-hashing, then a last-written completion marker rather than filesystem rename atomicity.

@@ -101,4 +101,4 @@ def test_source_observation_is_immutable() -> None:
         observation_method="synthetic array",
     )
     with pytest.raises(ValidationError):
-        observation.original_genotype = "AA"
+        observation.original_genotype = "AA"  # type: ignore[misc]
