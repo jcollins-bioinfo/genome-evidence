@@ -41,3 +41,7 @@ A parsed vendor genotype remains a source token, not a canonical allele or biolo
 ## Canonical-normalization boundary (M2)
 
 Canonicalization is a provenance-bearing representation derived from an observation, not a new observation or an inference. Mapping confidence is independent of assay and interpretation confidence. Strand and coordinate transformations never overwrite source tokens, and unresolved mappings remain explicit.
+
+## External-assertion boundary (M3)
+
+An SCV submission is distinct from a source-computed VCV aggregate. Exact source classification, review status, and conflicts remain source vocabulary; ClinVar review status is not the project's `InterpretationStatus`. An exact variant-to-evidence link annotates a canonical representation—it does not show that a sample carries ALT. M3 neither selects a winning assertion nor assigns clinical significance, disease probability, priority, or advice.

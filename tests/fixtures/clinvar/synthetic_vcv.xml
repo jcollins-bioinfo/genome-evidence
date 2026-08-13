@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ReleaseSet Dated="2026-07-01" ReleaseID="synthetic-2026-07" SchemaVersion="synthetic-vcv-1">
+  <VariationArchive Accession="VCV999000001" Version="2" VariationID="900001">
+    <ClassifiedRecord>
+      <SimpleAllele AlleleID="800001" VariationID="900001">
+        <Location><SequenceLocation Assembly="GRCh38" Chr="1" positionVCF="101" referenceAlleleVCF="A" alternateAlleleVCF="G"/></Location>
+      </SimpleAllele>
+      <Classifications><GermlineClassification DateLastEvaluated="2026-06-01"><Description>Conflicting classifications of syntheticity</Description><ReviewStatus>criteria provided, conflicting classifications</ReviewStatus></GermlineClassification></Classifications>
+      <ClinicalAssertion Accession="SCV999000001" Version="1" RecordStatus="current">
+        <ClinVarAccession Acc="SCV999000001" Version="1"/><Submitter Name="Synthetic Lab Alpha" ID="SYN-1"/>
+        <GermlineClassification DateLastEvaluated="2026-05-01"><Description>synthetic benign-like term</Description><ReviewStatus>criteria provided, single submitter</ReviewStatus></GermlineClassification>
+        <TraitSet><Trait><Name><ElementValue>Synthetic condition alpha</ElementValue></Name><XRef DB="SYN" ID="C1"/></Trait></TraitSet>
+        <ObservedIn/><Citation><ID Source="SyntheticJournal">42</ID></Citation><Method><MethodType>synthetic assertion method</MethodType></Method>
+      </ClinicalAssertion>
+      <ClinicalAssertion Accession="SCV999000002" Version="3" RecordStatus="current">
+        <Submitter SubmitterName="Synthetic Lab Beta" SubmitterID="SYN-2"/>
+        <GermlineClassification DateLastEvaluated="2026-05-02"><Description>synthetic pathogenic-like term</Description><ReviewStatus>criteria provided, single submitter</ReviewStatus></GermlineClassification>
+      </ClinicalAssertion>
+    </ClassifiedRecord>
+  </VariationArchive>
+  <VariationArchive Accession="VCV999000002" Version="1" VariationID="900002">
+    <ClassifiedRecord><Haplotype><SimpleAllele AlleleID="800002"/></Haplotype>
+      <Classifications><OncogenicityClassification><Description>synthetic unknown oncogenicity term</Description></OncogenicityClassification></Classifications>
+      <ClinicalAssertion Accession="SCV999000003" Version="1"><SomaticClinicalImpact><Description>synthetic tier term</Description></SomaticClinicalImpact></ClinicalAssertion>
+    </ClassifiedRecord>
+  </VariationArchive>
+</ReleaseSet>

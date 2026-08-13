@@ -32,3 +32,7 @@ The observation layer now includes a source-faithful 23andMe adapter with strict
 ## M2 implementation
 
 Normalization validates M1 manifests and checksums, then uses local checksummed marker definitions, reference sequence, and optional liftover mappings. It writes independent Parquet entities for variants, mappings, genotypes, and candidates; these artifacts are reconstructible analytical inputs, not claimed DuckDB persistence.
+
+## M3 implementation
+
+The offline ClinVar adapter streams a checksummed VCV XML snapshot into typed source snapshot, variant representation, assertion, relationship, and condition records. Linking validates every upstream artifact and compares only the exact canonical allele tuple. Assertions and links remain separate from observations, genotypes, and interpretations.
