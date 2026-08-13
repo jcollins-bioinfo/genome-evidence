@@ -27,6 +27,7 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
         with:
+          version: "0.7.22"
           enable-cache: true
           cache-dependency-glob: uv.lock
       - run: uv sync --locked --dev
@@ -42,3 +43,5 @@ jobs:
           python -m venv /tmp/genome-evidence-wheel
           /tmp/genome-evidence-wheel/bin/pip install dist/*.whl
           /tmp/genome-evidence-wheel/bin/genome-evidence version
+          /tmp/genome-evidence-wheel/bin/genome-evidence doctor
+          /tmp/genome-evidence-wheel/bin/genome-evidence prioritize clinical --help

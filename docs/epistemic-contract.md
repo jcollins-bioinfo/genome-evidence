@@ -45,3 +45,7 @@ Canonicalization is a provenance-bearing representation derived from an observat
 ## External-assertion boundary (M3)
 
 An SCV submission is distinct from a source-computed VCV aggregate. Exact source classification, review status, and conflicts remain source vocabulary; ClinVar review status is not the project's `InterpretationStatus`. An exact variant-to-evidence link annotates a canonical representation—it does not show that a sample carries ALT. M3 neither selects a winning assertion nor assigns clinical significance, disease probability, priority, or advice.
+
+## Manual-review prioritization boundary (M4)
+
+A review-priority band answers only which source-linked records an explicit policy routes for earlier human inspection. Exact source terms, SCV/VCV level, classification dimension, and record status remain attributed. Exact linkage does not establish ALT observation; reference-only, missing canonical genotype, and discordant called rows remain distinct. No band is a project classification, diagnosis, probability, urgency, penetrance, confidence, or actionability claim, and absence is not a negative test.

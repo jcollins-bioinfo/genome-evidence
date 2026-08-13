@@ -26,3 +26,7 @@ DuckDB is the initial analytical source of truth, backed where practical by immu
 ## M3 external records
 
 `ExternalSourceSnapshot` identifies exact release bytes and XML metadata. `ExternalVariantRepresentation` retains source identifiers and alleles. `ExternalAssertion` retains a submitted SCV or aggregate VCV claim, source vocabulary, logical accession/version, content fingerprint, and snapshot instance identity. `AssertionRelationship` keeps submission-to-aggregate relationships explicit. `VariantEvidenceLink` connects a representation—not a genotype or assertion—to an M2 `variant_id`, with explicit matched/unmatched/ambiguous/incompatible/unsupported outcomes.
+
+## M4 review-routing records
+
+`VariantEvidenceProfile` joins exact-linked source evidence to a canonical variant while preserving genotype state, SCV/VCV assertions, classification dimensions, terms, conditions, and unresolved assessments. `ClinicalReviewCandidate` carries a non-clinical review band and explicit eligibility. `CandidateAssertionLink`, `PriorityRationale`, and `PrioritizationExclusion` normalize traceability; `PolicyIdentity` captures exact policy bytes and canonical parsed configuration.
