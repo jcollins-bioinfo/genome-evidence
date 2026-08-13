@@ -37,3 +37,7 @@ A no-call and a called reference/reference genotype must remain queryably differ
 ## Source-ingestion boundary (M1)
 
 A parsed vendor genotype remains a source token, not a canonical allele or biological genotype. Lexical categories describe token shape only; they do not infer strand, REF/ALT, ploidy, or biological zygosity. User-provided assembly overrides remain distinguishable from vendor declarations, and coordinates never imply a build.
+
+## Canonical-normalization boundary (M2)
+
+Canonicalization is a provenance-bearing representation derived from an observation, not a new observation or an inference. Mapping confidence is independent of assay and interpretation confidence. Strand and coordinate transformations never overwrite source tokens, and unresolved mappings remain explicit.

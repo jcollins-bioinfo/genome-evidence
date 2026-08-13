@@ -7,6 +7,7 @@ import typer
 from genome_evidence import __version__
 from genome_evidence.ingest import Ingest23andMeConfig, ParseMode, ingest_23andme
 from genome_evidence.ingest.errors import GenotypeParseError
+from genome_evidence.normalization import NormalizationConfig, normalize_m1_run
 
 app = typer.Typer(help="Genome Evidence utilities.", no_args_is_help=True)
 ingest_app = typer.Typer(help="Ingest source-faithful observations.", no_args_is_help=True)
@@ -57,6 +58,38 @@ def ingest_twenty_three_and_me(
         typer.echo(f"Ingestion failed: {error}", err=True)
         raise typer.Exit(code=2) from error
     typer.echo(f"Ingestion complete: {result.qc_summary.parsed_record_count} source records")
+    typer.echo(f"Run ID: {result.run_id}")
+
+
+@app.command("normalize")
+def normalize(
+    input_path: Annotated[Path, typer.Option("--input", exists=True, file_okay=False)],
+    output_path: Annotated[Path, typer.Option("--output", file_okay=False)],
+    marker_definitions: Annotated[Path, typer.Option("--marker-definitions", exists=True)],
+    target_reference: Annotated[Path, typer.Option("--target-reference", exists=True)],
+    target_build: Annotated[str, typer.Option("--target-build")] = "GRCh38",
+    liftover: Annotated[Path | None, typer.Option("--liftover")] = None,
+    source_build: Annotated[str | None, typer.Option("--source-build")] = None,
+) -> None:
+    """Normalize a completed M1 run using explicit local reference resources."""
+    try:
+        result = normalize_m1_run(
+            input_path,
+            output_path,
+            NormalizationConfig(
+                marker_definitions=marker_definitions,
+                target_reference=target_reference,
+                target_build=target_build,
+                liftover=liftover,
+                source_build_override=source_build,
+            ),
+        )
+    except (ValueError, FileExistsError, OSError) as error:
+        typer.echo(f"Normalization failed: {error}", err=True)
+        raise typer.Exit(code=2) from error
+    mapped = sum(mapping.outcome.value == "mapped" for mapping in result.mappings)
+    typer.echo(f"Normalization complete: {len(result.mappings)} mappings; {mapped} mapped")
+    typer.echo(f"Output: {result.output_directory}")
     typer.echo(f"Run ID: {result.run_id}")
 
 

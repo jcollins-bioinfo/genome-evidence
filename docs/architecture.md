@@ -19,7 +19,7 @@ Genome Evidence is a provenance-first pipeline with typed boundaries. Adapters w
 13. **Value-of-information** — identify useful confirmation or missing inputs.
 14. **Reporting** — evidence-oriented views without synthetic clinical precision.
 
-Only boundary scaffolding exists at M0. A future WGS/VCF/BCF adapter enters through the observation layer, so downstream canonical mappings and evidence models do not need redesign. Likewise, 23andMe is merely one planned source adapter.
+M1 ingestion and M2 resource-driven normalization are implemented. A future WGS/VCF/BCF adapter enters through the immutable observation layer, so downstream canonical mappings and evidence models do not need redesign. 23andMe is one source adapter, not the conceptual model.
 
 ## Confidence and provenance
 
@@ -28,3 +28,7 @@ Measurement/mapping quality, statistical inference quality, and interpretation s
 ## M1 implementation
 
 The observation layer now includes a source-faithful 23andMe adapter with strict/lenient structural parsing and a separate descriptive QC package. The adapter processes logical lines from one exact-file byte read, retains source order/line numbers and vendor tokens, and emits provenance-linked JSON, Parquet, and Markdown artifacts. It creates no `Variant` or `ObservationVariantMapping`; those remain M2 responsibilities.
+
+## M2 implementation
+
+Normalization validates M1 manifests and checksums, then uses local checksummed marker definitions, reference sequence, and optional liftover mappings. It writes independent Parquet entities for variants, mappings, genotypes, and candidates; these artifacts are reconstructible analytical inputs, not claimed DuckDB persistence.

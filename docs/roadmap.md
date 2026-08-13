@@ -2,7 +2,7 @@
 
 - **M0 — Bootstrap:** epistemic contract, domain boundaries, provenance, storage scaffold, CLI, and quality gates.
 - **M1 — 23andMe ingestion/QC (implemented):** source-faithful adapter and assay-level quality reporting.
-- **M2 — Canonical normalization:** explicit allele mappings, strand handling, and liftover provenance.
+- **M2 — Canonical normalization (implemented):** explicit allele mappings, strand handling, and liftover provenance.
 - **M3 — External annotation/evidence:** versioned assertion ingestion.
 - **M4 — Clinical variant prioritization:** evidence-oriented prioritization without automatic classification.
 - **M5 — Ancestry:** scoped population-structure inference.

@@ -1,0 +1,11 @@
+# Canonical normalization (M2)
+
+M2 reads a completed, checksum-valid M1 run—not vendor text—and writes separate derived records. Its default target is GRCh38. `GRCh37`/`hg19` and `GRCh38`/`hg38` aliases resolve without discarding the original build token. Chromosomes use `1`–`22`, `X`, `Y`, and `MT`; canonical coordinates are one-based. The JSON liftover adapter deliberately accepts and returns zero-based positions, and the pipeline records the conversion.
+
+An observation reference is SHA-256 over the M1 run ID, source checksum, source line, sample, and all source fields. Thus rereads are stable and duplicate rows on different lines remain distinct. Variant identity is SHA-256 over assembly/chromosome/one-based position/uppercase REF/ALT. Scientific identifiers also include algorithm/configuration inputs where appropriate.
+
+Marker definitions are a JSON array with `marker_id`, `assembly`, `chromosome`, `position`, `reference`, `alternate`, `orientation`, and `orientation_authoritative`; optional `rsid` is metadata. References are local FASTA. Liftover is a small local JSON map from `CHROM:zero_based` to arrays of `[chromosome, zero_based]` candidates. Every file is SHA-256 recorded; resources are never downloaded.
+
+M2 completely supports sequence SNVs and same-length multi-base substitutions. It records none, complement, and reverse-complement transformations. Palindromic SNVs without authoritative orientation are ambiguous. Indels, symbolic alleles, missing definitions/builds, liftover ambiguity/failure, and REF mismatches become explicit row outcomes rather than invented variants. No-call loci can map but never yield a canonical called genotype; haploid tokens remain haploid.
+
+Artifacts are `manifest.json`, `normalization_metadata.json`, `variants.parquet`, `observation_mappings.parquet`, `canonical_genotypes.parquet`, `mapping_candidates.parquet`, `normalization_qc.json`, and a privacy-safe aggregate report. Outcomes are mapped, unmapped, ambiguous, failed, and unsupported, with granular reason codes. Canonicalization is representation, not annotation, inference, pathogenicity, risk, or clinical advice. A future VCF/BCF/WGS adapter can create immutable source observations and reuse this resource-driven derived boundary.
