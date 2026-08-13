@@ -22,3 +22,7 @@ DuckDB is the initial analytical source of truth, backed where practical by immu
 ## M1 source records
 
 `RawGenotypeObservation` is an immutable pre-normalization record containing the unchanged marker, chromosome and genotype tokens, positive source position, source line, pseudonymous sample, run ID, call state, and explicitly lexical categories. It intentionally has no REF, ALT, canonical genotype, annotation, dosage, or interpretation fields. `SourceMetadata` retains exact-file hash/size, comments, explicit versus overridden build provenance, counts, parser/package version, timestamp, and run. `AssayQCSummary` and `QCFinding` provide aggregate and record-referenced descriptive QC.
+
+## M3 external records
+
+`ExternalSourceSnapshot` identifies exact release bytes and XML metadata. `ExternalVariantRepresentation` retains source identifiers and alleles. `ExternalAssertion` retains a submitted SCV or aggregate VCV claim, source vocabulary, logical accession/version, content fingerprint, and snapshot instance identity. `AssertionRelationship` keeps submission-to-aggregate relationships explicit. `VariantEvidenceLink` connects a representation—not a genotype or assertion—to an M2 `variant_id`, with explicit matched/unmatched/ambiguous/incompatible/unsupported outcomes.

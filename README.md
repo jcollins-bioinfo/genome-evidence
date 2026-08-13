@@ -10,7 +10,7 @@ An assay observation is not an inference. Measured genotypes, canonical alleles,
 
 ## Status
 
-Milestones **M1–M2** implement source-faithful 23andMe ingestion/QC and explicit-resource canonical normalization. Annotation, interpretation, imputation, scoring, reference downloads, and biological analysis remain unimplemented.
+Milestones **M1–M2** are verified as implemented. M3 external assertion ingestion and exact linking are present but remain pending reproducible locked-dependency validation. Interpretation, conflict resolution, imputation, scoring, reference downloads, and biological analysis remain unimplemented; M4 is explicitly not implemented.
 
 ## Install and use
 
@@ -22,6 +22,8 @@ uv run genome-evidence version
 uv run genome-evidence doctor
 uv run genome-evidence ingest 23andme --input /private/input.txt --output /private/m1-run
 uv run genome-evidence normalize --input /private/m1-run --output /private/m2-run --marker-definitions /references/markers.json --target-reference /references/GRCh38.fa
+uv run genome-evidence evidence ingest-clinvar --input /references/fixed-vcv.xml.gz --output /private/evidence-run
+uv run genome-evidence evidence link --normalization-run /private/m2-run --evidence-run /private/evidence-run --output /private/annotation-run
 ```
 
 `doctor` checks only the local runtime and configuration; it does not inspect genotype data. The ingestion CLI is a thin wrapper over `ingest_23andme`; see [the M1 ingestion guide](docs/ingestion/23andme.md) and [assay-QC definitions](docs/qc/assay-level-qc.md).
@@ -33,6 +35,7 @@ uv run ruff check .
 uv run ruff format --check .
 uv run mypy src
 uv run pytest
+uv run pytest --nbmake notebooks
 ```
 
 ## Privacy warning

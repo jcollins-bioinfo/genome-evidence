@@ -157,15 +157,15 @@ def normalize_m1_run(m1: Path, output: Path, config: NormalizationConfig) -> Nor
         )
         defs = marker.definitions(o.source_marker_id)
         outcome = MappingOutcome.UNMAPPED
-        reason = "MARKER_DEFINITION_ABSENT"
+        reason: str | None = "MARKER_DEFINITION_ABSENT"
         strand = StrandTransform.UNKNOWN
         ls = LiftStatus.NOT_REQUIRED
         rv = ReferenceValidation.NOT_ATTEMPTED
         tc = None
         tp = None
         vid = None
-        cids = ()
-        correspondence = ()
+        cids: tuple[str, ...] = ()
+        correspondence: tuple[str, ...] = ()
         if source is None:
             reason = "MISSING_OR_UNKNOWN_BUILD"
         elif len(defs) != 1:
