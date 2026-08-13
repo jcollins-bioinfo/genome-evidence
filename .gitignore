@@ -1,0 +1,41 @@
+# Personal genomic, sequencing, and clinical data (never commit)
+/data/
+/private/
+/reports/
+*23andme*.txt
+*genome*.txt
+*.vcf
+*.vcf.gz
+*.bcf
+*.bam
+*.cram
+*.sam
+*.fastq
+*.fastq.gz
+*.fq
+*.fq.gz
+*clinical*export*
+*.duckdb
+*.duckdb.wal
+*.db
+*.sqlite*
+
+# Secrets and local environments
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.venv/
+venv/
+
+# Tool artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+.coverage

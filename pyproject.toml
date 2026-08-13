@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "genome-evidence"
+version = "0.1.0"
+description = "Reproducible, provenance-first personal-genomics evidence infrastructure"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = ["duckdb>=1.2", "polars>=1.20", "pydantic>=2.10", "typer>=0.15"]
+
+[project.scripts]
+genome-evidence = "genome_evidence.cli:app"
+
+[dependency-groups]
+dev = ["mypy>=1.14", "pre-commit>=4", "pytest>=8.3", "ruff>=0.9", "typer>=0.15"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/genome_evidence"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
