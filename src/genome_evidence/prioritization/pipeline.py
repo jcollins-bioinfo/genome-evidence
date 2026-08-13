@@ -23,7 +23,11 @@ from genome_evidence.evidence.models import (
     VariantEvidenceLink,
 )
 from genome_evidence.ingest.twenty_three_and_me import _validate_private_output
-from genome_evidence.normalization.models import CanonicalGenotype
+from genome_evidence.normalization.models import (
+    CanonicalGenotype,
+    MappingCandidate,
+    ObservationMapping,
+)
 
 from .models import (
     CandidateAssertionLink,
@@ -54,6 +58,99 @@ UNRESOLVED = (
     "family_segregation_not_assessed",
 )
 
+PROFILE_SCHEMA = {
+    "profile_id": pl.String,
+    "m2_run_id": pl.String,
+    "variant_id": pl.String,
+    "assembly": pl.String,
+    "chromosome": pl.String,
+    "position": pl.Int64,
+    "reference": pl.String,
+    "alternate": pl.String,
+    "genotype_state": pl.String,
+    "genotype_rows": pl.List(
+        pl.Struct(
+            {
+                "genotype_id": pl.String,
+                "observation_reference": pl.String,
+                "ploidy": pl.Int64,
+                "alt_allele_count": pl.Int64,
+            }
+        )
+    ),
+    **{
+        name: pl.List(pl.String)
+        for name in (
+            "representation_ids",
+            "assertion_ids",
+            "scv_assertion_ids",
+            "vcv_assertion_ids",
+            "source_accessions",
+            "assertion_levels",
+            "classification_types",
+            "source_terms",
+            "source_term_routes",
+            "source_review_statuses",
+            "source_review_levels",
+            "source_record_statuses",
+            "submitters",
+            "condition_ids",
+            "condition_names",
+            "date_last_evaluated",
+            "submission_term_diversity",
+            "missing_indicators",
+            "unresolved_assessments",
+        )
+    },
+    "evidence_age_days": pl.List(pl.Int64),
+    "source_snapshot_id": pl.String,
+    "source_release_date": pl.String,
+    "source_reported_conflict": pl.Boolean,
+}
+CANDIDATE_SCHEMA = {
+    "candidate_id": pl.String,
+    "profile_id": pl.String,
+    "variant_id": pl.String,
+    "priority_band": pl.String,
+    "eligibility": pl.String,
+    "ordering_components": pl.List(pl.String),
+    "source_review_level_order": pl.Int64,
+    "source_reported_conflict_order": pl.Int64,
+    "evaluation_date_missing_order": pl.Int64,
+    "evidence_age_days_order": pl.Int64,
+}
+ASSERTION_LINK_SCHEMA = {
+    "link_id": pl.String,
+    "candidate_id": pl.String,
+    "assertion_instance_id": pl.String,
+    "assertion_level": pl.String,
+    "classification_type": pl.String,
+    "source_term": pl.String,
+    "source_term_route": pl.String,
+    "active_for_routing": pl.Boolean,
+}
+RATIONALE_SCHEMA = {
+    "rationale_id": pl.String,
+    "candidate_id": pl.String,
+    "profile_id": pl.String,
+    "policy_rule_id": pl.String,
+    "policy_rule_version": pl.String,
+    "rationale_type": pl.String,
+    "reason_code": pl.String,
+    "assertion_ids": pl.List(pl.String),
+    "genotype_ids": pl.List(pl.String),
+    "observation_references": pl.List(pl.String),
+    "source_term": pl.String,
+    "classification_type": pl.String,
+    "explanation": pl.String,
+}
+EXCLUSION_SCHEMA = {
+    "exclusion_id": pl.String,
+    "profile_id": pl.String,
+    "candidate_id": pl.String,
+    "reason_code": pl.String,
+}
+
 
 def _hash(path: Path) -> str:
     return sha256(path.read_bytes()).hexdigest()
@@ -81,6 +178,8 @@ def _manifest(directory: Path, label: str) -> dict[str, Any]:
     if not isinstance(result.get("artifacts"), dict):
         raise ValueError(f"invalid {label} artifact registry")
     for name, expected in result["artifacts"].items():
+        if not isinstance(name, str) or Path(name).name != name or not isinstance(expected, str):
+            raise ValueError(f"invalid {label} artifact registry entry")
         artifact = directory / name
         if not artifact.is_file() or _hash(artifact) != expected:
             raise ValueError(f"{label} artifact checksum mismatch: {name}")
@@ -208,7 +307,22 @@ def prioritize_clinical_variants(
         normalization_directory / "canonical_genotypes.parquet", CanonicalGenotype, "M2 genotypes"
     )
     _unique(genotypes, "genotype_id", "genotype")
-    if any(g.normalization_run_id != m2["run_id"] for g in genotypes):
+    mappings = _rows(
+        normalization_directory / "observation_mappings.parquet",
+        ObservationMapping,
+        "M2 observation mappings",
+    )
+    mapping_candidates = _rows(
+        normalization_directory / "mapping_candidates.parquet",
+        MappingCandidate,
+        "M2 mapping candidates",
+    )
+    _unique(mappings, "mapping_id", "mapping")
+    _unique(mapping_candidates, "candidate_id", "mapping candidate")
+    if any(
+        row.normalization_run_id != m2["run_id"]
+        for row in [*genotypes, *mappings, *mapping_candidates]
+    ):
         raise ValueError("M2 genotype run identity mismatch")
     if any(g.variant_id not in set(variant_ids) for g in genotypes):
         raise ValueError("M2 genotype references an unknown variant")
@@ -238,6 +352,7 @@ def prioritize_clinical_variants(
         (assertions, "assertion_instance_id", "assertion"),
         (conditions, "condition_id", "condition"),
         (links, "link_id", "link"),
+        (condition_links, "relationship_id", "assertion-condition relationship"),
     ):
         _unique(rows, attr, label)
     rep_ids, assertion_ids, condition_ids = (
@@ -254,6 +369,8 @@ def prioritize_clinical_variants(
         for link in links
     ):
         raise ValueError("matched link references an unknown M2 variant")
+    if any(link.annotation_run_id != annotation["run_id"] for link in links):
+        raise ValueError("annotation link run identity mismatch")
     if any(
         x.assertion_instance_id not in assertion_ids or x.condition_id not in condition_ids
         for x in condition_links
@@ -310,7 +427,7 @@ def prioritize_clinical_variants(
             (a, t, r) for a, t, r in active if a.classification_type.value == "germline"
         ]
         source_conflict = any(
-            "conflict" in _normalize(term)
+            _normalize(term).startswith("conflicting classification")
             for a, term, _ in routed
             if a.assertion_level.value == "source_computed_aggregate"
             and a.classification_type.value == "germline"
@@ -345,6 +462,7 @@ def prioritize_clinical_variants(
             vcv_assertion_ids=tuple(
                 a.assertion_instance_id for a in relevant if not a.scv_accession
             ),
+            source_accessions=tuple(a.logical_source_key for a in relevant),
             assertion_levels=tuple(a.assertion_level.value for a in relevant),
             classification_types=tuple(a.classification_type.value for a in relevant),
             source_terms=tuple(term for _, term, _ in routed),
@@ -362,6 +480,12 @@ def prioritize_clinical_variants(
             condition_names=tuple(condition_map[c].source_name for c in cids),
             date_last_evaluated=tuple(
                 str(a.date_last_evaluated) if a.date_last_evaluated else "unknown" for a in relevant
+            ),
+            evidence_age_days=tuple(
+                (snapshot.release_date - a.date_last_evaluated).days
+                if a.date_last_evaluated is not None
+                else None
+                for a in relevant
             ),
             source_snapshot_id=snapshot.snapshot_id,
             source_release_date=str(snapshot.release_date),
@@ -432,13 +556,40 @@ def prioritize_clinical_variants(
                 "no_active_germline_assertion",
             )
         candidate_id = _stable("candidate", [profile_id, band.value])
+        policy_rule = next((rule for rule in policy.priority_rules if rule.band == band), None)
+        if policy_rule is None:
+            raise ValueError(f"policy has no rule for computed band {band.value}")
+        review_rank = {
+            SourceReviewLevel.PRACTICE_GUIDELINE: 0,
+            SourceReviewLevel.EXPERT_PANEL: 1,
+            SourceReviewLevel.MULTIPLE_SUBMITTERS: 2,
+            SourceReviewLevel.SINGLE_SUBMITTER: 3,
+            SourceReviewLevel.NO_ASSERTION_CRITERIA: 4,
+            SourceReviewLevel.UNKNOWN: 5,
+        }
+        review_order = min(
+            (review_rank[level] for level in profile.source_review_levels), default=5
+        )
+        missing_date_order = int(any(age is None for age in profile.evidence_age_days))
+        age_order = max((age for age in profile.evidence_age_days if age is not None), default=-1)
         candidate = ClinicalReviewCandidate(
             candidate_id=candidate_id,
             profile_id=profile_id,
             variant_id=variant["variant_id"],
             priority_band=band,
             eligibility=eligibility,
-            ordering_components=(band.value, "source_review_status_contextual", profile_id),
+            ordering_components=(
+                band.value,
+                str(review_order),
+                str(int(not source_conflict)),
+                str(missing_date_order),
+                str(age_order),
+                profile_id,
+            ),
+            source_review_level_order=review_order,
+            source_reported_conflict_order=int(not source_conflict),
+            evaluation_date_missing_order=missing_date_order,
+            evidence_age_days_order=age_order,
         )
         candidates.append(candidate)
         for assertion, term, route in routed:
@@ -468,8 +619,8 @@ def prioritize_clinical_variants(
                 rationale_id=_stable("rationale", [candidate_id, reason]),
                 candidate_id=candidate_id,
                 profile_id=profile_id,
-                policy_rule_id=reason,
-                policy_rule_version=policy.version,
+                policy_rule_id=policy_rule.rule_id,
+                policy_rule_version=policy_rule.version,
                 rationale_type=rationale_type,
                 reason_code=reason,
                 assertion_ids=tuple(a.assertion_instance_id for a, _, _ in active_germline),
@@ -499,6 +650,55 @@ def prioritize_clinical_variants(
                     ),
                 )
             )
+        unknown_active = sorted(
+            {
+                a.assertion_instance_id
+                for a, _, _ in active_germline
+                if a.source_record_status.value == "unknown"
+            }
+        )
+        if unknown_active:
+            rationales.append(
+                PriorityRationale(
+                    rationale_id=_stable("rationale", [candidate_id, "unknown_record_status"]),
+                    candidate_id=candidate_id,
+                    profile_id=profile_id,
+                    policy_rule_id=policy_rule.rule_id,
+                    policy_rule_version=policy_rule.version,
+                    rationale_type="warns",
+                    reason_code="unknown_record_status_active_by_policy",
+                    assertion_ids=tuple(unknown_active),
+                    explanation=(
+                        "The source record status is unknown and the explicit policy retains it "
+                        "as active for routing."
+                    ),
+                )
+            )
+        if policy.freshness_warning_days is not None:
+            stale = tuple(
+                a.assertion_instance_id
+                for a in relevant
+                if a.date_last_evaluated is not None
+                and (snapshot.release_date - a.date_last_evaluated).days
+                > policy.freshness_warning_days
+            )
+            if stale:
+                rationales.append(
+                    PriorityRationale(
+                        rationale_id=_stable("rationale", [candidate_id, "freshness_warning"]),
+                        candidate_id=candidate_id,
+                        profile_id=profile_id,
+                        policy_rule_id=policy_rule.rule_id,
+                        policy_rule_version=policy_rule.version,
+                        rationale_type="warns",
+                        reason_code="source_evaluation_older_than_policy_threshold",
+                        assertion_ids=stale,
+                        explanation=(
+                            "Source evaluation age, measured against the snapshot release date, "
+                            "exceeds the policy threshold."
+                        ),
+                    )
+                )
         if band == ReviewPriorityBand.NOT_ELIGIBLE:
             exclusions.append(
                 PrioritizationExclusion(
@@ -521,7 +721,16 @@ def prioritize_clinical_variants(
             )
         )
     }
-    candidates.sort(key=lambda x: (band_order[x.priority_band], x.profile_id))
+    candidates.sort(
+        key=lambda x: (
+            band_order[x.priority_band],
+            x.source_review_level_order,
+            x.source_reported_conflict_order,
+            x.evaluation_date_missing_order,
+            x.evidence_age_days_order,
+            x.profile_id,
+        )
+    )
     run_id, started = str(uuid4()), datetime.now(UTC)
     _validate_private_output(output_directory)
     if output_directory.exists():
@@ -530,11 +739,11 @@ def prioritize_clinical_variants(
     temporary.mkdir(parents=True)
     try:
         specs: dict[str, tuple[list[Any], dict[str, Any]]] = {
-            "variant_evidence_profiles.parquet": (profiles, {"profile_id": pl.String}),
-            "prioritization_candidates.parquet": (candidates, {"candidate_id": pl.String}),
-            "candidate_assertion_links.parquet": (candidate_links, {"link_id": pl.String}),
-            "priority_rationales.parquet": (rationales, {"rationale_id": pl.String}),
-            "prioritization_exclusions.parquet": (exclusions, {"exclusion_id": pl.String}),
+            "variant_evidence_profiles.parquet": (profiles, PROFILE_SCHEMA),
+            "prioritization_candidates.parquet": (candidates, CANDIDATE_SCHEMA),
+            "candidate_assertion_links.parquet": (candidate_links, ASSERTION_LINK_SCHEMA),
+            "priority_rationales.parquet": (rationales, RATIONALE_SCHEMA),
+            "prioritization_exclusions.parquet": (exclusions, EXCLUSION_SCHEMA),
         }
         artifacts = {}
         for name, (records, schema) in specs.items():
@@ -602,6 +811,8 @@ def prioritize_clinical_variants(
         profiles=tuple(profiles),
         candidates=tuple(candidates),
         rationales=tuple(rationales),
+        candidate_assertion_links=tuple(candidate_links),
+        exclusions=tuple(exclusions),
         manifest=manifest,
     )
 
@@ -634,8 +845,7 @@ def _report(
             f"## {p.assembly}:{p.chromosome}:{p.position}:{p.reference}>{p.alternate}",
             f"- Review band: `{candidate.priority_band.value}` (manual routing only)",
             f"- Genotype evidence state: `{p.genotype_state.value}`",
-            "- ClinVar records: "
-            + (", ".join(sorted(set(p.scv_assertion_ids + p.vcv_assertion_ids))) or "none"),
+            "- ClinVar records: " + (", ".join(sorted(set(p.source_accessions))) or "none"),
             f"- Source terms: {', '.join(x.source_term for x in cl) or 'none'}",
             f"- Review statuses: {', '.join(p.source_review_statuses)}",
             f"- Assertion levels: {', '.join(p.assertion_levels)}",

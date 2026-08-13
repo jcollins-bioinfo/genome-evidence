@@ -13,3 +13,14 @@ The initial context is explicitly `germline_constitutional`. Germline assertions
 ## Consequences
 
 Phenotype fit, family history, inheritance, penetrance, actionability, segregation, and clinical confirmation remain unresolved. Called reference, absent canonical genotype, and discordant calls remain distinct. Absence from the queue is neither comprehensive assay coverage nor a negative result. This conservatism costs convenience but preserves provenance and prevents source vocabulary from becoming a project clinical conclusion.
+
+## Terminology sources
+
+The routing vocabulary is source-attributed and follows the boundaries described by the
+[ACMG/AMP interpretation framework](https://pmc.ncbi.nlm.nih.gov/articles/PMC4544753/),
+[ClinGen variant-classification guidance](https://www.clinicalgenome.org/tools/clingen-variant-classification-guidance/),
+[ClinVar classification terminology](https://www.ncbi.nlm.nih.gov/clinvar/docs/clinsig/), and
+[ClinVar review-status definitions](https://www.ncbi.nlm.nih.gov/clinvar/docs/review_status/).
+M4 does not implement ACMG/AMP criteria. Clinical actionability is a separate ClinGen curation
+activity, and direct-to-consumer observations retain the limitations described by
+[FDA guidance](https://www.fda.gov/medical-devices/in-vitro-diagnostics/direct-consumer-tests).
