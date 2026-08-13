@@ -1,0 +1,3 @@
+# SYNTHETIC TEST DATA
+syntheticBad	1	not-an-integer	AA
+syntheticGood	1	2	CC

@@ -10,7 +10,7 @@ An assay observation is not an inference. Measured genotypes, canonical alleles,
 
 ## Status
 
-Milestone **M0 (bootstrap)** only: typed domain boundaries, storage schema scaffolding, documentation, and a local-only CLI. No ingestion, normalization, interpretation, imputation, scoring, reference downloads, or biological analysis is implemented.
+Milestone **M1** implements source-faithful 23andMe raw-text ingestion and descriptive assay/file QC. Canonical normalization, interpretation, imputation, scoring, reference downloads, and biological analysis remain unimplemented.
 
 ## Install and use
 
@@ -20,9 +20,10 @@ Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 uv sync --dev
 uv run genome-evidence version
 uv run genome-evidence doctor
+uv run genome-evidence ingest 23andme --input /private/input.txt --output /private/run
 ```
 
-`doctor` checks only the local runtime and configuration; it does not inspect genotype data.
+`doctor` checks only the local runtime and configuration; it does not inspect genotype data. The ingestion CLI is a thin wrapper over `ingest_23andme`; see [the M1 ingestion guide](docs/ingestion/23andme.md) and [assay-QC definitions](docs/qc/assay-level-qc.md).
 
 ## Quality gates
 

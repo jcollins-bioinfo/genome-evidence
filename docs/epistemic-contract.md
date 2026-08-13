@@ -33,3 +33,7 @@ heterogeneous evidence count -> absolute disease probability
 ```
 
 A no-call and a called reference/reference genotype must remain queryably different. An imputed allele may motivate confirmation; it cannot be relabeled as directly observed.
+
+## Source-ingestion boundary (M1)
+
+A parsed vendor genotype remains a source token, not a canonical allele or biological genotype. Lexical categories describe token shape only; they do not infer strand, REF/ALT, ploidy, or biological zygosity. User-provided assembly overrides remain distinguishable from vendor declarations, and coordinates never imply a build.

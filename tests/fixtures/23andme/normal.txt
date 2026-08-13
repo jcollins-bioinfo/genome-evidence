@@ -1,0 +1,6 @@
+# SYNTHETIC TEST DATA - NOT A REAL PERSON
+# source build: GRCh37
+# rsid	chromosome	position	genotype
+rsSynthetic1	1	101	AG
+rsSynthetic2	1	202	CC
+internalSynthetic	X	303	--

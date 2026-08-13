@@ -24,3 +24,7 @@ Only boundary scaffolding exists at M0. A future WGS/VCF/BCF adapter enters thro
 ## Confidence and provenance
 
 Measurement/mapping quality, statistical inference quality, and interpretation support are independent. Derived records reference input IDs and a pipeline run containing input hashes, configuration hash, software/git identity, transformation, and reference versions. Raw records are never destructively enriched.
+
+## M1 implementation
+
+The observation layer now includes a source-faithful 23andMe adapter with strict/lenient structural parsing and a separate descriptive QC package. The adapter processes logical lines from one exact-file byte read, retains source order/line numbers and vendor tokens, and emits provenance-linked JSON, Parquet, and Markdown artifacts. It creates no `Variant` or `ObservationVariantMapping`; those remain M2 responsibilities.
