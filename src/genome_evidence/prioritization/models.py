@@ -4,7 +4,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class AnalysisContext(StrEnum):
@@ -74,8 +74,43 @@ class PrioritizationPolicy(BaseModel):
     freshness_warning_days: int | None = Field(default=None, ge=0)
     tie_breaking: tuple[str, ...]
 
+    @field_validator("version")
+    @classmethod
+    def semantic_version(cls, value: str) -> str:
+        parts = value.split(".")
+        if len(parts) != 3 or any(not part.isdigit() for part in parts):
+            raise ValueError("policy version must be a three-part semantic version")
+        return value
+
     @model_validator(mode="after")
     def routes_do_not_overlap(self) -> "PrioritizationPolicy":
+        if set(self.term_routes) != set(SourceTermRoute):
+            raise ValueError("policy must define every source-term route")
+        expected_types = {"germline", "somatic_clinical_impact", "oncogenicity", "unknown"}
+        if set(self.classification_type_handling) != expected_types:
+            raise ValueError("policy must define every supported classification type")
+        if self.classification_type_handling != {
+            "germline": "route",
+            "somatic_clinical_impact": "context_only",
+            "oncogenicity": "context_only",
+            "unknown": "context_only",
+        }:
+            raise ValueError("unsupported classification-type handling")
+        if not self.priority_rules or len({r.rule_id for r in self.priority_rules}) != len(
+            self.priority_rules
+        ):
+            raise ValueError("policy priority rule IDs must be present and unique")
+        if any(
+            value not in {"active", "inactive"} for value in self.record_status_behavior.values()
+        ):
+            raise ValueError("record-status behavior must be active or inactive")
+        if set(self.record_status_behavior) != {"current", "replaced", "deleted", "unknown"}:
+            raise ValueError("policy must define current, replaced, deleted, and unknown statuses")
+        if (
+            self.record_status_behavior["replaced"] != "inactive"
+            or self.record_status_behavior["deleted"] != "inactive"
+        ):
+            raise ValueError("deleted and replaced assertions must be inactive")
         seen: dict[str, SourceTermRoute] = {}
         for route, terms in self.term_routes.items():
             for term in terms:
@@ -122,6 +157,7 @@ class VariantEvidenceProfile(BaseModel):
     assertion_ids: tuple[str, ...]
     scv_assertion_ids: tuple[str, ...]
     vcv_assertion_ids: tuple[str, ...]
+    source_accessions: tuple[str, ...]
     assertion_levels: tuple[str, ...]
     classification_types: tuple[str, ...]
     source_terms: tuple[str, ...]
@@ -133,6 +169,7 @@ class VariantEvidenceProfile(BaseModel):
     condition_ids: tuple[str, ...]
     condition_names: tuple[str, ...]
     date_last_evaluated: tuple[str, ...]
+    evidence_age_days: tuple[int | None, ...]
     source_snapshot_id: str
     source_release_date: str
     source_reported_conflict: bool
@@ -149,6 +186,10 @@ class ClinicalReviewCandidate(BaseModel):
     priority_band: ReviewPriorityBand
     eligibility: CandidateEligibility
     ordering_components: tuple[str, ...]
+    source_review_level_order: int = Field(ge=0)
+    source_reported_conflict_order: int = Field(ge=0, le=1)
+    evaluation_date_missing_order: int = Field(ge=0, le=1)
+    evidence_age_days_order: int = Field(ge=-1)
 
 
 class CandidateAssertionLink(BaseModel):
@@ -202,4 +243,6 @@ class PrioritizationResult(BaseModel):
     profiles: tuple[VariantEvidenceProfile, ...]
     candidates: tuple[ClinicalReviewCandidate, ...]
     rationales: tuple[PriorityRationale, ...]
+    candidate_assertion_links: tuple[CandidateAssertionLink, ...]
+    exclusions: tuple[PrioritizationExclusion, ...]
     manifest: dict[str, Any]
