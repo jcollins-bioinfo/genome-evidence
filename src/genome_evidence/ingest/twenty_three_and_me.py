@@ -32,7 +32,7 @@ from genome_evidence.qc.models import (
 from genome_evidence.qc.report import render_qc_report
 
 PARSER_VERSION = "1"
-_BUILD_PATTERN = re.compile(r"(?:build|assembly)[\s:=]+(GRCh\d+|hg\d+)", re.IGNORECASE)
+_BUILD_PATTERN = re.compile(r"(?:build|assembly)[\s:=]+(GRCh\d+|hg\d+|37|38)\b", re.IGNORECASE)
 
 
 class Ingest23andMeConfig(BaseModel):

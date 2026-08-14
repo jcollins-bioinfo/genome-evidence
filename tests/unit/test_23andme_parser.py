@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from genome_evidence.ingest import Ingest23andMeConfig, IngestionResult, ParseMode, ingest_23andme
 from genome_evidence.ingest.errors import GenotypeParseError
+from genome_evidence.normalization.resources import canonical_assembly
 from genome_evidence.qc.models import BuildProvenance, CallState, LexicalGenotypeCategory
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "23andme"
@@ -134,6 +135,24 @@ def test_build_is_not_guessed_and_override_is_tagged(tmp_path: Path) -> None:
     assert overridden.source_metadata.declared_build is None
     assert overridden.source_metadata.resolved_build == "GRCh38"
     assert overridden.source_metadata.build_provenance == BuildProvenance.USER_OVERRIDE
+
+
+@pytest.mark.parametrize(("vendor_build", "expected"), [("37", "GRCh37"), ("38", "GRCh38")])
+def test_standard_23andme_build_header_is_vendor_declared(
+    tmp_path: Path, vendor_build: str, expected: str
+) -> None:
+    source = tmp_path / "source.txt"
+    source.write_text(
+        f"# We are using reference human assembly build {vendor_build}.\nrs1\t1\t2\tCG\n"
+    )
+
+    result = ingest_23andme(source, tmp_path / "run", Ingest23andMeConfig())
+
+    assert result.source_metadata.declared_build == vendor_build
+    assert result.source_metadata.build_provenance == BuildProvenance.VENDOR_DECLARED
+    assert result.qc_summary.declared_or_resolved_build == vendor_build
+    assert result.source_metadata.resolved_build == vendor_build
+    assert canonical_assembly(result.source_metadata.resolved_build) == expected
 
 
 def test_out_of_order_is_reported_without_reordering(tmp_path: Path) -> None:
