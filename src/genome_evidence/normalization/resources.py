@@ -12,9 +12,14 @@ from genome_evidence.normalization.models import ResourceIdentity, StrandTransfo
 
 
 def canonical_assembly(value: str) -> str | None:
-    return {"grch37": "GRCh37", "hg19": "GRCh37", "grch38": "GRCh38", "hg38": "GRCh38"}.get(
-        value.lower()
-    )
+    return {
+        "37": "GRCh37",
+        "grch37": "GRCh37",
+        "hg19": "GRCh37",
+        "38": "GRCh38",
+        "grch38": "GRCh38",
+        "hg38": "GRCh38",
+    }.get(value.lower())
 
 
 def canonical_chromosome(value: str) -> str:

@@ -24,6 +24,18 @@ def test_source_reader_retains_only_marker_identity_and_coordinates(tmp_path: Pa
     assert all(not hasattr(marker, "genotype") for marker in markers)
 
 
+@pytest.mark.parametrize(("vendor_build", "expected"), [("37", "GRCh37"), ("38", "GRCh38")])
+def test_source_reader_recognizes_standard_23andme_build_header(
+    tmp_path: Path, vendor_build: str, expected: str
+) -> None:
+    source = tmp_path / "source.txt"
+    source.write_text(
+        f"# We are using reference human assembly build {vendor_build}.\nrs1\t1\t2\tCG\n"
+    )
+
+    assert read_source_markers(source)[0] == expected
+
+
 def test_source_reader_requires_a_verified_build(tmp_path: Path) -> None:
     source = tmp_path / "source.txt"
     source.write_text("rs1\t1\t2\tCG\n")

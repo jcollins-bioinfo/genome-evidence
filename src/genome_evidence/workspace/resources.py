@@ -32,7 +32,7 @@ KENT_TOOL_URL = (
 )
 SELECTION_SCHEMA = "genome-evidence-normalization-resource-selection/v1"
 PROVENANCE_SCHEMA = "genome-evidence-normalization-resource-provenance/v1"
-_BUILD_PATTERN = re.compile(r"(?:build|assembly)[\s:=]+(GRCh\d+|hg\d+)", re.IGNORECASE)
+_BUILD_PATTERN = re.compile(r"(?:build|assembly)[\s:=]+(GRCh\d+|hg\d+|37|38)\b", re.IGNORECASE)
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 
 
