@@ -71,13 +71,17 @@ def prepare_personal_runtime(
         ).stdout
         if dirty:
             raise ValueError("source checkout is dirty; preserve or move it aside and rerun")
-        runner(["git", "-C", str(checkout), "fetch", "--tags", "origin"], check=True, timeout=120)
     else:
         runner(
             ["git", "clone", "--no-checkout", settings.repository_url, str(checkout)],
             check=True,
             timeout=180,
         )
+    runner(
+        ["git", "-C", str(checkout), "fetch", "--force", "origin", settings.repository_ref],
+        check=True,
+        timeout=180,
+    )
     resolved = runner(
         [
             "git",
@@ -85,7 +89,7 @@ def prepare_personal_runtime(
             str(checkout),
             "rev-parse",
             "--verify",
-            f"{settings.repository_ref}^{{commit}}",
+            "FETCH_HEAD^{commit}",
         ],
         check=True,
         capture_output=True,

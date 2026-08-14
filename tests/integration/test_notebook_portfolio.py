@@ -1,5 +1,27 @@
+import ast
 import json
+import subprocess
+import sys
 from pathlib import Path
+from typing import Any, NoReturn
+
+import pytest
+
+
+def canonical_bootstrap() -> str:
+    tree = ast.parse(Path("scripts/sync_notebook_bootstrap.py").read_text())
+    assignment = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "BOOTSTRAP" for target in node.targets
+        )
+    )
+    assert isinstance(assignment, ast.Assign)
+    value = ast.literal_eval(assignment.value)
+    assert isinstance(value, str)
+    return value
 
 
 def test_notebook_portfolio_and_profiles_are_synchronized() -> None:
@@ -46,3 +68,34 @@ def test_bootstrap_cells_are_byte_identical() -> None:
         for n in notebooks
     ]
     assert len(set(cells)) == 1
+    assert cells[0] == canonical_bootstrap()
+
+
+def test_synthetic_bootstrap_uses_installed_package_without_external_operations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbidden(*args: object, **kwargs: object) -> NoReturn:
+        raise AssertionError("synthetic bootstrap attempted an external process")
+
+    monkeypatch.setattr(subprocess, "run", forbidden)
+    namespace: dict[str, Any] = {
+        "PROFILE": "synthetic_ci",
+        "REPOSITORY_URL": "https://github.com/jcollins-bioinfo/genome-evidence.git",
+        "REPOSITORY_REF": "main",
+        "WORKSPACE_ROOT": "/must/not/be/touched",
+        "SUBJECT_ID": "subject-0001",
+        "sys": sys,
+    }
+    exec(canonical_bootstrap(), namespace)
+    assert namespace["BOOTSTRAP_STATUS"]["profile"] == "synthetic_ci"
+    assert namespace["BOOTSTRAP_STATUS"]["import_path"] == "installed-ci-package"
+
+
+def test_personal_bootstrap_resolves_fetched_head_not_a_local_branch() -> None:
+    source = canonical_bootstrap()
+    assert '["git", "-C", str(CHECKOUT), "fetch", "--force", "origin", REPOSITORY_REF]' in source
+    assert '"FETCH_HEAD^{commit}"' in source
+    assert 'f"{REPOSITORY_REF}^{{commit}}"' not in source
+    assert source.index('importlib.import_module("genome_evidence")') > source.index(
+        '"pip",\n            "install"'
+    )
