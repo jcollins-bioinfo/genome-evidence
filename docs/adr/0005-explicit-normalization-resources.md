@@ -4,7 +4,7 @@
 
 ## Decision
 
-M2 consumes checksum-validated M1 Parquet and uses only explicit, local, versioned marker, reference, and liftover resources. Source observations remain unchanged. Observation references include M1 identity and source line; canonical variants use assembly/chromosome/position/REF/ALT. Ambiguity and failures are first-class mapping outcomes.
+M2 consumes checksum-validated M1 Parquet and uses only explicit, local, versioned marker, reference, and liftover resources. Marker definitions must match the resolved source assembly. Large FASTA references require a checksummed adjacent FAI for bounded random access. Source observations remain unchanged. Observation references include M1 identity and source line; canonical variants use assembly/chromosome/position/REF/ALT. Ambiguity and failures are first-class mapping outcomes.
 
 ## Consequences
 

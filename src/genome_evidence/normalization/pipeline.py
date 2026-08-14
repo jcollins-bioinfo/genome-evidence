@@ -155,7 +155,8 @@ def normalize_m1_run(m1: Path, output: Path, config: NormalizationConfig) -> Nor
             source_position=o.source_position,
             target_assembly=target,
         )
-        defs = marker.definitions(o.source_marker_id)
+        all_defs = marker.definitions(o.source_marker_id)
+        defs = tuple(d for d in all_defs if canonical_assembly(d.assembly) == source)
         outcome = MappingOutcome.UNMAPPED
         reason: str | None = "MARKER_DEFINITION_ABSENT"
         strand = StrandTransform.UNKNOWN
@@ -168,6 +169,9 @@ def normalize_m1_run(m1: Path, output: Path, config: NormalizationConfig) -> Nor
         correspondence: tuple[str, ...] = ()
         if source is None:
             reason = "MISSING_OR_UNKNOWN_BUILD"
+        elif all_defs and not defs:
+            outcome = MappingOutcome.UNSUPPORTED
+            reason = "MARKER_DEFINITION_ASSEMBLY_MISMATCH"
         elif len(defs) != 1:
             if defs:
                 outcome = MappingOutcome.AMBIGUOUS

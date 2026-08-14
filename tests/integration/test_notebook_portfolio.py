@@ -102,6 +102,18 @@ def test_personal_bootstrap_resolves_fetched_head_not_a_local_branch() -> None:
     )
 
 
+def test_personal_notebook_workflow_publishes_and_resolves_runs() -> None:
+    notebook_01 = Path("notebooks/01_ingest_and_normalize_genome.ipynb").read_text()
+    notebook_04 = Path("notebooks/04_population_structure_projection.ipynb").read_text()
+
+    assert "run_personal_m1_m2" in notebook_01
+    assert "GENOME_EVIDENCE_NORMALIZATION_RUN" in notebook_01
+    assert "resolve_personal_m2_run" in notebook_04
+    assert "resolve_personal_population_bundle" in notebook_04
+    assert "publish_completed_run" in notebook_04
+    assert "M2 run missing; complete notebook 01" not in notebook_04
+
+
 def test_personal_bootstrap_imports_checkout_in_same_fresh_process(tmp_path: Path) -> None:
     checkout = tmp_path / "checkout"
     package = checkout / "src/genome_evidence"
