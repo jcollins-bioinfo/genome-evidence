@@ -731,6 +731,12 @@ dependencies = [
     { name = "typer" },
 ]
 
+[package.optional-dependencies]
+notebook = [
+    { name = "ipykernel" },
+    { name = "jupyter" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "build" },
@@ -748,11 +754,14 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "duckdb", specifier = ">=1.2" },
+    { name = "ipykernel", marker = "extra == 'notebook'", specifier = ">=6.29" },
+    { name = "jupyter", marker = "extra == 'notebook'", specifier = ">=1.1" },
     { name = "numpy", specifier = ">=2.1" },
     { name = "polars", specifier = ">=1.20" },
     { name = "pydantic", specifier = ">=2.10" },
     { name = "typer", specifier = ">=0.15" },
 ]
+provides-extras = ["notebook"]
 
 [package.metadata.requires-dev]
 dev = [

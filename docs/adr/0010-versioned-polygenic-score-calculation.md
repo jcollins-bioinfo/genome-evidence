@@ -1,0 +1,7 @@
+# ADR 0010: versioned polygenic-score calculation
+
+M7 implements a narrow strict validator for prepared PGS Catalog scoring-format 2.0 additive rows rather than embedding Nextflow/containers in Colab. `pgsc_calc` is the scientific reference; broad harmonization is acquisition-time work. Production utility identity must be pinned in bundle provenance. No production model is installed here.
+
+Analysis requires checksummed M2 GRCh38 artifacts. M6 input is explicit and remains gated pending complete lineage/quality validation. Exact assembly/chromosome/position/REF/ALT identity is mandatory; rsID, swaps, complements, allele sets, and liftover are never guessed. Effect dosage is ALT dosage or `2 - ALT dosage` for a REF effect allele. Decimal weights are deterministic. Missing is never zero/reference and partial consumer-array sums remain non-evaluable absent a model-specific validated policy.
+
+Reference comparison requires exact model, build, matching, and missingness compatibility, explicit selection, and no M5-based choice. Acquisition and offline analysis are separated. Contributions are private model outputs with observed/inferred provenance; reports are aggregate-only. Raw scores are not diagnoses, probabilities, absolute risks, advice, or portable percentiles. HLA, haplotypes, indels, CNVs, STRs, interactions, calibration, and reproductive ranking are excluded. Seven notebooks use synchronized dual-profile bootstrap architecture.
