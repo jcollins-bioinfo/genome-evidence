@@ -36,6 +36,8 @@ These commands report aggregate status only. Use the public Python APIs `validat
 
 `genome-evidence workspace init` creates a provider-neutral, non-destructive tree. Durable PGx bundles belong under `references/pharmacogenomics/`, evictable source caches under `cache/{clinpgx,pharmvar,pharmcat}/`, and private M8 outputs under `runs/m8_pharmacogenomics/`. The canonical Colab location remains `/content/drive/MyDrive/genome-evidence-private`; local/offline roots are supported and preferred for privacy-sensitive work.
 
+Notebook 01 now consumes the content-addressed private source imported by notebook 00 when explicit local marker definitions, GRCh38 FASTA/FAI, and any required liftover map are installed. It computes ephemerally, publishes re-hashed M1/M2 runs with last-written completion markers, and registers the latest compatible M2 run. Notebook 04 resolves that registration automatically and publishes M5 output when one reviewed local population bundle is installed. Re-running workspace initialization safely creates newly required directories in an older valid workspace; no production resources are downloaded or fabricated.
+
 Every stage creates immutable, checksummed artifacts with source/input identities, configuration and algorithm identity, package/Git identity, and explicit schemas. Package versions, artifact schemas, project milestones, and external source releases are independent. See [architecture](docs/architecture.md), the [data model](docs/data-model.md), [PGx model documentation](docs/pharmacogenomics/model-and-evidence.md), [changelog](CHANGELOG.md), and [version policy](docs/development/versioning-and-releases.md).
 
 ## Notebooks
@@ -53,7 +55,7 @@ The [canonical notebook index](notebooks/README.md) lists all eight notebooks ex
 
 ## Development, versioning, and roadmap
 
-The package is pre-1.0 (`0.2.0` prepared by M8): public APIs and schemas may evolve only under the documented compatibility/deprecation policy. M8 does not tag, publish, sign, or create a release. Follow the [roadmap](docs/roadmap.md), ADRs, documentation expectations in `AGENTS.md`, and MIT [license](LICENSE). Pharmacogenomic source acknowledgements and links are maintained in the PGx documentation; external labels remain attributed source vocabulary.
+The package is pre-1.0 (`0.3.0` prepared): public APIs and schemas may evolve only under the documented compatibility/deprecation policy. This change adds workspace APIs and an optional resource-identity field without removing existing public contracts. It does not tag, publish, sign, or create a release. Follow the [roadmap](docs/roadmap.md), ADRs, documentation expectations in `AGENTS.md`, and MIT [license](LICENSE). Pharmacogenomic source acknowledgements and links are maintained in the PGx documentation; external labels remain attributed source vocabulary.
 
 CI runs these locked gates:
 

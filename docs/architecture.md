@@ -31,7 +31,7 @@ The observation layer now includes a source-faithful 23andMe adapter with strict
 
 ## M2 implementation
 
-Normalization validates M1 manifests and checksums, then uses local checksummed marker definitions, reference sequence, and optional liftover mappings. It writes independent Parquet entities for variants, mappings, genotypes, and candidates; these artifacts are reconstructible analytical inputs, not claimed DuckDB persistence.
+Normalization validates M1 manifests and checksums, then uses source-build-matched marker definitions, a checksummed local reference sequence (FAI-backed for large FASTA), and optional liftover mappings. It writes independent Parquet entities for variants, mappings, genotypes, and candidates; these artifacts are reconstructible analytical inputs, not claimed DuckDB persistence. The personal notebook path computes outside Drive, publishes re-hashed M1/M2 directories with last-written completion markers, and registers a latest compatible M2 pointer.
 
 ## M3 implementation
 
@@ -47,7 +47,8 @@ Population structure consumes only checksum-valid M2 artifacts and a local stric
 
 ## Private workspace and M6 boundary
 
-The `workspace` package owns provider-neutral durable paths, content-addressed source import, and relative JSON run registries. M6 consumes validated M2 directly through a local-only engine adapter and source-agnostic checked reference contract. Its phase and imputation tables are inference stores, never observation stores or automatic downstream inputs. Publication uses copy, destination re-hashing, then a last-written completion marker rather than filesystem rename atomicity.
+The `workspace` package owns provider-neutral durable paths, content-addressed source import, relative JSON run registries, and M1/M2/M5 publication. Registered resolution validates the completion marker and every declared artifact before returning a path. M6 consumes validated M2 directly through a local-only engine adapter and source-agnostic checked reference contract. Its phase and imputation tables are inference stores, never observation stores or automatic downstream inputs. Publication uses copy, destination re-hashing, then a last-written completion marker rather than filesystem rename atomicity.
+
 ## M8 pharmacogenomics
 
 The pharmacogenomics package validates a local immutable evidence bundle, validates

@@ -17,7 +17,7 @@ def resources(path: Path) -> tuple[Path, Path]:
             [
                 {
                     "marker_id": "rsSynthetic1",
-                    "assembly": "GRCh37",
+                    "assembly": "GRCh38",
                     "chromosome": "1",
                     "position": 101,
                     "reference": "A",
@@ -27,7 +27,7 @@ def resources(path: Path) -> tuple[Path, Path]:
                 },
                 {
                     "marker_id": "rsSynthetic2",
-                    "assembly": "GRCh37",
+                    "assembly": "GRCh38",
                     "chromosome": "1",
                     "position": 202,
                     "reference": "C",
@@ -37,7 +37,7 @@ def resources(path: Path) -> tuple[Path, Path]:
                 },
                 {
                     "marker_id": "internalSynthetic",
-                    "assembly": "GRCh37",
+                    "assembly": "GRCh38",
                     "chromosome": "X",
                     "position": 303,
                     "reference": "A",
@@ -143,3 +143,39 @@ def test_duplicate_observation_references_use_source_line(tmp_path: Path) -> Non
     assert [x.observation_reference for x in first.mappings] == [
         x.observation_reference for x in second.mappings
     ]
+
+
+def test_marker_definition_must_match_resolved_source_assembly(tmp_path: Path) -> None:
+    fixture = Path(__file__).parents[1] / "fixtures" / "23andme" / "duplicate_marker.txt"
+    m1 = tmp_path / "m1"
+    ingest_23andme(fixture, m1, Ingest23andMeConfig(genome_build_override="GRCh38"))
+    markers = tmp_path / "markers.json"
+    markers.write_text(
+        json.dumps(
+            [
+                {
+                    "marker_id": "syntheticDup",
+                    "assembly": "GRCh37",
+                    "chromosome": "1",
+                    "position": 10,
+                    "reference": "A",
+                    "alternate": "G",
+                    "orientation": "none",
+                    "orientation_authoritative": True,
+                }
+            ]
+        )
+    )
+    fasta = tmp_path / "GRCh38.fa"
+    fasta.write_text(">1\n" + "A" * 20 + "\n")
+
+    result = normalize_m1_run(
+        m1,
+        tmp_path / "m2",
+        NormalizationConfig(marker_definitions=markers, target_reference=fasta),
+    )
+
+    assert {mapping.outcome.value for mapping in result.mappings} == {"unsupported"}
+    assert {mapping.reason for mapping in result.mappings} == {
+        "MARKER_DEFINITION_ASSEMBLY_MISMATCH"
+    }

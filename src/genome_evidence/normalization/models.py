@@ -43,6 +43,7 @@ class ResourceIdentity(BaseModel):
     logical_name: str
     version: str
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    index_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     local_identity: str
     assembly: str | None = None
     source_assembly: str | None = None
