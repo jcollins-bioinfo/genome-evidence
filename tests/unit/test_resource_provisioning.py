@@ -1,8 +1,10 @@
 import gzip
+import subprocess
 from pathlib import Path
 
 import pytest
 
+import genome_evidence.workspace.resources as resource_module
 from genome_evidence.workspace.resources import (
     BigBedVariant,
     SourceMarker,
@@ -99,6 +101,26 @@ def test_fasta_index_rejects_an_interior_short_line(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="irregular non-terminal"):
         build_fasta_index(fasta, tmp_path / "bad.fa.fai")
+
+
+def test_kent_tool_probe_rejects_an_unrelated_executable(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    cached = root / "cache/tools/ucsc/kent-v479/bigBedNamedItems"
+    cached.parent.mkdir(parents=True)
+    cached.write_bytes(b"not the expected tool")
+    work = tmp_path / "work"
+    work.mkdir()
+
+    def unused_download(_url: str, _destination: Path) -> None:
+        raise AssertionError("existing cache must not be downloaded again")
+
+    def wrong_runner(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="unrelated usage\n")
+
+    with pytest.raises(ValueError, match="expected bigBedNamedItems CLI"):
+        resource_module._prepare_kent_tool(  # noqa: SLF001
+            root, work, unused_download, wrong_runner
+        )
 
 
 def test_bigbed_value_model_is_immutable() -> None:

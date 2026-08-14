@@ -30,6 +30,11 @@ KENT_VERSION = "479"
 KENT_TOOL_URL = (
     f"https://hgdownload.soe.ucsc.edu/admin/exe/linux.x86_64.v{KENT_VERSION}/bigBedNamedItems"
 )
+_KENT_USAGE_TOKENS = (
+    "bigbednameditems - extract item of given name from bigbed",
+    "bigbednameditems file.bb name output.bed",
+    "-namefile",
+)
 SELECTION_SCHEMA = "genome-evidence-normalization-resource-selection/v1"
 PROVENANCE_SCHEMA = "genome-evidence-normalization-resource-provenance/v1"
 _BUILD_PATTERN = re.compile(r"(?:build|assembly)[\s:=]+(GRCh\d+|hg\d+|37|38)\b", re.IGNORECASE)
@@ -444,10 +449,14 @@ def _prepare_kent_tool(
     local = work / "bigBedNamedItems"
     shutil.copyfile(cached, local)
     os.chmod(local, 0o700)
-    probe = runner([str(local)], capture_output=True, text=True, check=False, timeout=30)
+    try:
+        probe = runner([str(local)], capture_output=True, text=True, check=False, timeout=30)
+    except OSError as error:
+        raise ValueError("cached UCSC utility is not an executable for this runtime") from error
     probe_text = (probe.stdout or "") + (probe.stderr or "")
-    if f"kent source version {KENT_VERSION}" not in probe_text.lower():
-        raise ValueError("cached UCSC utility does not report the pinned Kent version")
+    normalized_probe = probe_text.lower()
+    if probe.returncode == 0 or not all(token in normalized_probe for token in _KENT_USAGE_TOKENS):
+        raise ValueError("cached UCSC utility does not expose the expected bigBedNamedItems CLI")
     return local, _hash(local)
 
 
