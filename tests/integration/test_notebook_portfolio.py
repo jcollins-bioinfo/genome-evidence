@@ -34,6 +34,7 @@ def test_notebook_portfolio_and_profiles_are_synchronized() -> None:
         "04_population_structure_projection.ipynb",
         "05_reference_panel_phasing_and_imputation.ipynb",
         "06_polygenic_score_calculation.ipynb",
+        "07_pharmacogenomics_evidence.ipynb",
     ]
     assert [p.name for p in sorted(Path("notebooks").glob("*.ipynb"))] == expected
     root, index = Path("README.md").read_text(), Path("notebooks/README.md").read_text()
