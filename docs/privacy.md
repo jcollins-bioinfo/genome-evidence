@@ -13,3 +13,10 @@ M4 profiles, candidate tables, rationales, exclusions, and reports are private d
 M5 alignments, coordinates, distances, neighbors, support evaluations, sensitivity records, and reports are private derived genomic artifacts. CLI output is aggregate-only; reference validation and projection never download data.
 
 Private workspaces must remain outside Git. Personal sources, reference genotypes, native VCFs, engine logs, caches, JARs, and executed notebook outputs are not repository material. M6 analysis is offline and aggregate-only; public acquisition cannot inspect target directories. Colab is a Google-managed VM and is not appropriate when cloud processing is unacceptable.
+## M8 pharmacogenomics
+
+M8 target analysis is offline. Keep checked bundles under
+`references/pharmacogenomics`, downloads in the source-specific caches, and private
+outputs under `runs/m8_pharmacogenomics`. CLI/notebook output is aggregate-first;
+candidate rows remain private. Never transmit genotype rows, manifests, phenotype
+evidence, medication information, or private paths to remote services.

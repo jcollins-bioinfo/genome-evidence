@@ -38,3 +38,10 @@ DuckDB is the initial analytical source of truth, backed where practical by immu
 ## M6 inference records
 
 M6 keeps target alignments/exclusions, observed statistical phase inference, imputed genotype inference, official variant quality, masked internal-consistency rows, and chromosome state/checkpoint rows as distinct typed artifacts. Every scientific identifier is content/lineage derived. Official fields retain ALT orientation and header-declared Number/Type semantics. Zero-row tables still have explicit schemas.
+## M8 records
+
+M8 adds separate typed records for source identity, gene capability, canonical
+locus, named-allele definition/haplotype evidence, locus constraint, function
+assertion, candidate diplotype, phenotype rule/evidence, and guideline evidence.
+Schemas are `genome-evidence-pgx-bundle/v1`, `genome-evidence-m8-run/v1`, and
+`genome-evidence-m8-completion/v1`; they do not track package versions.

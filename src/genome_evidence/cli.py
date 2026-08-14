@@ -14,6 +14,10 @@ from genome_evidence.evidence import (
 from genome_evidence.ingest import Ingest23andMeConfig, ParseMode, ingest_23andme
 from genome_evidence.ingest.errors import GenotypeParseError
 from genome_evidence.normalization import NormalizationConfig, normalize_m1_run
+from genome_evidence.pharmacogenomics import (
+    infer_pharmacogenomics,
+    validate_pharmacogenomics_bundle,
+)
 from genome_evidence.phasing_imputation import (
     BeagleEngine,
     M6Config,
@@ -64,6 +68,52 @@ pgs_app = typer.Typer(
     help="Validate and calculate selected local polygenic scores.", no_args_is_help=True
 )
 app.add_typer(pgs_app, name="pgs")
+pgx_app = typer.Typer(
+    help="Offline research-only PGx candidate evidence; never clinical calls or recommendations.",
+    no_args_is_help=True,
+)
+app.add_typer(pgx_app, name="pgx")
+
+
+@pgx_app.command("validate-bundle")
+def pgx_validate_bundle(
+    bundle: Annotated[Path, typer.Option("--bundle", exists=True, file_okay=False)],
+) -> None:
+    """Validate a local checksummed PGx bundle offline without target data."""
+    try:
+        result = validate_pharmacogenomics_bundle(bundle)
+    except (ValueError, OSError) as error:
+        typer.echo(f"PGx bundle validation failed: {error}", err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo(
+        f"PGx bundle valid: {result.bundle_id} {result.bundle_version}; genes: {len(result.genes)}"
+    )
+
+
+@pgx_app.command("infer")
+def pgx_infer(
+    normalization_run: Annotated[
+        Path, typer.Option("--normalization-run", exists=True, file_okay=False)
+    ],
+    bundle: Annotated[Path, typer.Option("--bundle", exists=True, file_okay=False)],
+    output: Annotated[Path, typer.Option("--output", file_okay=False)],
+    gene: Annotated[list[str], typer.Option("--gene")],
+) -> None:
+    """Produce offline candidate evidence, not clinical calls or recommendations."""
+    try:
+        result = infer_pharmacogenomics(normalization_run, bundle, output, tuple(gene))
+    except (ValueError, FileExistsError, OSError) as error:
+        typer.echo(f"PGx inference failed: {error}", err=True)
+        raise typer.Exit(code=2) from error
+    counts: dict[str, int] = {}
+    for item in result.gene_results:
+        counts[item.outcome.value] = counts.get(item.outcome.value, 0) + 1
+    typer.echo(f"Selected genes: {len(gene)}")
+    typer.echo(
+        "Evaluability: " + ", ".join(f"{key}={value}" for key, value in sorted(counts.items()))
+    )
+    typer.echo(f"Run ID: {result.run_id}")
+    typer.echo(f"Output: {result.output_directory}")
 
 
 @pgs_app.command("validate-bundle")

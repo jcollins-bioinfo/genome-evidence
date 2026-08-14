@@ -48,3 +48,9 @@ Population structure consumes only checksum-valid M2 artifacts and a local stric
 ## Private workspace and M6 boundary
 
 The `workspace` package owns provider-neutral durable paths, content-addressed source import, and relative JSON run registries. M6 consumes validated M2 directly through a local-only engine adapter and source-agnostic checked reference contract. Its phase and imputation tables are inference stores, never observation stores or automatic downstream inputs. Publication uses copy, destination re-hashing, then a last-written completion marker rather than filesystem rename atomicity.
+## M8 pharmacogenomics
+
+The pharmacogenomics package validates a local immutable evidence bundle, validates
+an upstream M2 run, creates exact observed-locus evidence, enumerates bounded
+candidate diplotypes, and atomically publishes typed artifacts. Acquisition is
+separate from target analysis; unsupported methods fail closed. See ADR 0011.
