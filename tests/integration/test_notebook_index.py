@@ -12,5 +12,5 @@ def test_every_notebook_has_exact_colab_links_in_both_indexes() -> None:
         assert root.count(target) == 1
         assert index.count(target) == 1
         assert notebook.is_file()
-    listed = re.findall(r"\]\((\d\d_[^)]+\.ipynb)\)", index)
+    listed = re.findall(r"\| \d\dB? \|[^\n]+\[([^)]+\.ipynb)\]\(", index)
     assert listed == [p.name for p in notebooks]

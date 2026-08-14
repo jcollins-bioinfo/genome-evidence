@@ -6,6 +6,9 @@ This project follows [Keep a Changelog](https://keepachangelog.com/) structure.
 
 ### Added
 
+- Notebook 00B and public workspace provisioning APIs for exact-source dbSNP marker
+  extraction, checksummed GRCh38 FASTA/FAI installation, conservative cross-build
+  maps, canonical Drive placement, durable selection, and provenance manifests.
 - An operational personal M1→M2 notebook workflow with content-addressed source
   selection, ephemeral computation, verified Drive publication, and compatible-run
   resolution for downstream notebooks.
@@ -19,8 +22,11 @@ This project follows [Keep a Changelog](https://keepachangelog.com/) structure.
 
 ### Changed
 
-- Prepare package version 0.3.0; installed distribution metadata remains the single
+- Prepare package version 0.4.0; installed distribution metadata remains the single
   runtime version authority.
+- Notebook 01 resolves the source-compatible resource selection persisted by notebook
+  00B, while explicit environment selectors remain supported.
+- Colab bootstrap rejects mixed in-memory package revisions before switching a checkout.
 - Notebook 04 now resolves a registered compatible M2 run automatically and publishes
   M5 output when a reviewed local population bundle is installed.
 

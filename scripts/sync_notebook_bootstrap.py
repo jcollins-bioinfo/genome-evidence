@@ -56,18 +56,36 @@ if PROFILE == "personal_drive":
         text=True,
         timeout=30,
     ).stdout.strip()
+    loaded_package_modules = [
+        module
+        for name, module in sys.modules.items()
+        if name == "genome_evidence" or name.startswith("genome_evidence.")
+    ]
+    if loaded_package_modules:
+        current_commit = subprocess.run(
+            ["git", "-C", str(CHECKOUT), "rev-parse", "HEAD^{commit}"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout.strip()
+        loaded_paths = [
+            Path(str(module_file)).resolve()
+            for module in loaded_package_modules
+            if (module_file := getattr(module, "__file__", None)) is not None
+        ]
+        if current_commit != RESOLVED_COMMIT or any(
+            not path.is_relative_to(CHECKOUT.resolve()) for path in loaded_paths
+        ):
+            raise RuntimeError(
+                "genome_evidence modules from another revision are already loaded; "
+                "restart the runtime and rerun from the first cell"
+            )
     subprocess.run(
         ["git", "-C", str(CHECKOUT), "checkout", "--detach", RESOLVED_COMMIT],
         check=True,
         timeout=60,
     )
-    previously_imported = sys.modules.get("genome_evidence")
-    if previously_imported is not None:
-        previous_file = Path(getattr(previously_imported, "__file__", "")).resolve()
-        if not previous_file.is_relative_to(CHECKOUT.resolve()):
-            raise RuntimeError(
-                "genome_evidence was already imported elsewhere; restart the runtime"
-            )
     subprocess.run(
         [
             sys.executable,

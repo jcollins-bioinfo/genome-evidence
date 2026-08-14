@@ -21,6 +21,7 @@ from .core import (
     resolve_latest_compatible_run,
     validate_workspace,
 )
+from .resources import load_normalization_resource_selection
 
 SOURCE_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 
@@ -87,6 +88,23 @@ def _single_resource(
             f"or set {variable} to a workspace-contained file"
         )
     return candidates[0]
+
+
+def _selected_resource(
+    root: Path,
+    environment: Mapping[str, str],
+    variable: str,
+    configured: str | None,
+    directory: str,
+    suffixes: tuple[str, ...],
+    label: str,
+) -> Path:
+    explicit = environment.get(variable)
+    if explicit:
+        return _workspace_file(root, explicit, label)
+    if configured is not None:
+        return _workspace_file(root, configured, label)
+    return _single_resource(root, environment, variable, directory, suffixes, label)
 
 
 def _selected_source(root: Path, environment: Mapping[str, str]) -> tuple[Path, str]:
@@ -181,18 +199,21 @@ def run_personal_m1_m2(
     env = os.environ if environment is None else environment
     root = initialize_workspace(root, WorkspaceConfig(subject_id=subject_id))
     source, source_digest = _selected_source(root, env)
-    markers = _single_resource(
+    selection = load_normalization_resource_selection(root, source_digest)
+    markers = _selected_resource(
         root,
         env,
         "GENOME_EVIDENCE_MARKER_DEFINITIONS",
+        selection.marker_definitions if selection is not None else None,
         "references/markers/23andme",
         (".json",),
         "23andMe marker definitions",
     )
-    fasta = _single_resource(
+    fasta = _selected_resource(
         root,
         env,
         "GENOME_EVIDENCE_GRCH38_FASTA",
+        selection.grch38_fasta if selection is not None else None,
         "references/genome/grch38",
         (".fa", ".fasta", ".fna"),
         "GRCh38 FASTA",
@@ -218,6 +239,10 @@ def run_personal_m1_m2(
                 "source genome build is missing or unsupported; set "
                 "GENOME_EVIDENCE_SOURCE_BUILD to GRCh37 or GRCh38 only after verification"
             )
+        if selection is not None and resolved_source != selection.source_assembly:
+            raise ValueError(
+                "provisioned normalization resources do not match the resolved source assembly"
+            )
         published_m1 = publish_completed_run(
             root,
             m1.output_directory,
@@ -226,10 +251,11 @@ def run_personal_m1_m2(
         )
         liftover = None
         if resolved_source != "GRCh38":
-            liftover = _single_resource(
+            liftover = _selected_resource(
                 root,
                 env,
                 "GENOME_EVIDENCE_GRCH37_TO_GRCH38_LIFTOVER",
+                (selection.grch37_to_grch38_liftover if selection is not None else None),
                 "references/liftover/grch37_to_grch38",
                 (".json",),
                 "GRCh37-to-GRCh38 liftover map",
@@ -240,10 +266,23 @@ def run_personal_m1_m2(
             NormalizationConfig(
                 marker_definitions=markers,
                 target_reference=fasta,
-                marker_version=env.get("GENOME_EVIDENCE_MARKER_VERSION", "unversioned-local"),
-                reference_version=env.get("GENOME_EVIDENCE_REFERENCE_VERSION", "GRCh38-local"),
+                marker_version=env.get(
+                    "GENOME_EVIDENCE_MARKER_VERSION",
+                    selection.marker_version if selection is not None else "unversioned-local",
+                ),
+                reference_version=env.get(
+                    "GENOME_EVIDENCE_REFERENCE_VERSION",
+                    selection.reference_version if selection is not None else "GRCh38-local",
+                ),
                 liftover=liftover,
-                liftover_version=env.get("GENOME_EVIDENCE_LIFTOVER_VERSION", "unversioned-local"),
+                liftover_version=env.get(
+                    "GENOME_EVIDENCE_LIFTOVER_VERSION",
+                    (
+                        selection.liftover_version
+                        if selection is not None and selection.liftover_version is not None
+                        else "unversioned-local"
+                    ),
+                ),
                 source_build_override=source_build_override,
             ),
         )
