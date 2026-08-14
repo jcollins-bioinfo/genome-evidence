@@ -62,3 +62,14 @@ M2 observed allele multisets are immutable. Statistical phase has arbitrary hapl
 ## Polygenic-score boundary (M7)
 
 A score is an identified model output, not an observation. Exact observed M2 allele counts and optional validated M6 dosages remain distinguishishable inputs. Missing markers remain missing and partial sums are not complete published scores absent an explicit validated policy. Raw scores are not probabilities, diagnoses, absolute risks, treatment advice, or portable percentiles; reference context requires an exact compatible, explicitly selected distribution.
+
+## Pharmacogenomics boundary (M8)
+
+Named-allele definitions and haplotype evidence, external function assertions,
+software candidate diplotypes, source phenotype rules, guideline evidence, clinical
+laboratory results, and treatment decisions remain distinct. M8 uses M2 observed
+canonical genotypes only. Missing or unassayed loci never imply reference or `*1`;
+unphased ambiguity remains explicit. Candidates are not confirmed clinical genotypes,
+phenotype evidence is not a treatment instruction, and no medication or dose
+recommendation is generated. Structural, HLA, mitochondrial, CYP2D6, and other
+unsupported methods fail closed.

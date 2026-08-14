@@ -48,3 +48,6 @@ jobs:
           /tmp/genome-evidence-wheel/bin/genome-evidence prioritize clinical --help
           /tmp/genome-evidence-wheel/bin/genome-evidence ancestry validate-reference --help
           /tmp/genome-evidence-wheel/bin/genome-evidence ancestry project --help
+          /tmp/genome-evidence-wheel/bin/genome-evidence pgx --help
+          /tmp/genome-evidence-wheel/bin/genome-evidence pgx validate-bundle --help
+          /tmp/genome-evidence-wheel/bin/genome-evidence pgx infer --help
