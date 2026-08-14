@@ -24,8 +24,10 @@ DIRECTORIES = (
     "references/phasing_imputation",
     "references/polygenic_scores",
     "references/pharmacogenomics",
+    "references/manifests/normalization",
     "cache/downloads",
     "cache/tools/beagle",
+    "cache/tools/ucsc/kent-v479",
     "cache/transformed_references",
     "cache/pgs_catalog",
     "cache/clinpgx",
@@ -73,7 +75,11 @@ def _json(path: Path, value: Any) -> None:
 
 def _inside_repo(root: Path) -> bool:
     resolved = root.resolve()
-    return any((parent / ".git").exists() for parent in (resolved, *resolved.parents))
+    for parent in (resolved, *resolved.parents):
+        marker = parent / ".git"
+        if marker.is_file() or (marker / "HEAD").is_file():
+            return True
+    return False
 
 
 def initialize_workspace(root: Path, config: WorkspaceConfig) -> Path:

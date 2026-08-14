@@ -1,6 +1,6 @@
 # Roadmap
 
-- **M0 — Bootstrap:** epistemic contract, domain boundaries, provenance, storage scaffold, CLI, and quality gates.
+- **M0 — Bootstrap:** epistemic contract, domain boundaries, provenance, storage scaffold, CLI, quality gates, and implemented M0B production normalization-resource provisioning.
 - **M1 — 23andMe ingestion/QC (implemented):** source-faithful adapter and assay-level quality reporting.
 - **M2 — Canonical normalization (implemented):** explicit allele mappings, strand handling, and liftover provenance.
 - **M3 — External annotation/evidence (implemented):** verified in the locked M4 hardening CI history.

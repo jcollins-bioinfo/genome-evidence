@@ -28,6 +28,7 @@ def canonical_bootstrap() -> str:
 def test_notebook_portfolio_and_profiles_are_synchronized() -> None:
     expected = [
         "00_initialize_private_workspace.ipynb",
+        "00b_provision_normalization_resources.ipynb",
         "01_ingest_and_normalize_genome.ipynb",
         "02_versioned_external_evidence.ipynb",
         "03_evidence_oriented_clinical_review.ipynb",
@@ -54,6 +55,9 @@ def test_notebook_portfolio_and_profiles_are_synchronized() -> None:
             c.get("execution_count") is None for c in notebook["cells"] if c["cell_type"] == "code"
         )
         assert all(not c.get("outputs") for c in notebook["cells"] if c["cell_type"] == "code")
+        for cell_number, cell in enumerate(notebook["cells"]):
+            if cell["cell_type"] == "code":
+                compile("".join(cell.get("source", [])), f"{name}:cell-{cell_number}", "exec")
     assert "01_ingest_and_normalize_synthetic_genome" not in root + index
 
 

@@ -17,14 +17,22 @@ from .personal import (
     resolve_personal_population_bundle,
     run_personal_m1_m2,
 )
+from .resources import (
+    NormalizationResourceSelection,
+    ProvisioningResult,
+    provision_personal_normalization_resources,
+)
 
 __all__ = [
     "WorkspaceConfig",
     "PersonalNormalizationResult",
+    "NormalizationResourceSelection",
+    "ProvisioningResult",
     "import_23andme_source",
     "initialize_workspace",
     "list_completed_runs",
     "publish_completed_run",
+    "provision_personal_normalization_resources",
     "register_completed_run",
     "resolve_completed_run",
     "resolve_latest_compatible_run",

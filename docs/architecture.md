@@ -31,7 +31,7 @@ The observation layer now includes a source-faithful 23andMe adapter with strict
 
 ## M2 implementation
 
-Normalization validates M1 manifests and checksums, then uses source-build-matched marker definitions, a checksummed local reference sequence (FAI-backed for large FASTA), and optional liftover mappings. It writes independent Parquet entities for variants, mappings, genotypes, and candidates; these artifacts are reconstructible analytical inputs, not claimed DuckDB persistence. The personal notebook path computes outside Drive, publishes re-hashed M1/M2 directories with last-written completion markers, and registers a latest compatible M2 pointer.
+Normalization validates M1 manifests and checksums, then uses source-build-matched marker definitions, a checksummed local reference sequence (FAI-backed for large FASTA), and optional liftover mappings. M0B provisions these independently of genotype calls: exact source-build rsID placements are extracted from pinned UCSC dbSNP 155 indexes, 23andMe's documented plus-strand convention is retained as attributed provenance, the GRCh38 archive is checked against UCSC's published MD5 before decompression and FAI construction, and incompatible or unresolved loci are omitted rather than inferred. A source-bound selection schema persists workspace-relative resource paths and versions. M2 writes independent Parquet entities for variants, mappings, genotypes, and candidates; these artifacts are reconstructible analytical inputs, not claimed DuckDB persistence. The personal notebook path computes outside Drive, publishes re-hashed M1/M2 directories with last-written completion markers, and registers a latest compatible M2 pointer.
 
 ## M3 implementation
 
