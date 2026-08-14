@@ -41,7 +41,14 @@ def test_provisioned_resources_drive_personal_m1_m2(
     def fake_runner(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         if len(args) == 1:
             return subprocess.CompletedProcess(
-                args, 255, stdout="", stderr="### kent source version 479 ###\n"
+                args,
+                255,
+                stdout="",
+                stderr=(
+                    "bigBedNamedItems - Extract item of given name from bigBed\n"
+                    "usage:\n   bigBedNamedItems file.bb name output.bed\n"
+                    "   -nameFile - treat name as a file\n"
+                ),
             )
         output = Path(args[-1])
         if args[2] == resource_module.DBSNP_URLS["GRCh37"]:
