@@ -51,7 +51,7 @@ The staged plan runs from source ingestion and canonical normalization through v
 
 ## Notebooks
 
-The [canonical notebook index](notebooks/README.md) lists all six independent notebooks. Each badge opens but does not auto-run, mount Drive, grant access, create folders, or guarantee the lockfile environment.
+The [canonical notebook index](notebooks/README.md) lists all seven notebooks. Each badge opens but does not auto-run, mount Drive, grant access, create folders, or guarantee the lockfile environment.
 
 - [00 initialize private workspace](notebooks/00_initialize_private_workspace.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jcollins-bioinfo/genome-evidence/blob/main/notebooks/00_initialize_private_workspace.ipynb)
 - [01 ingest and normalize genome](notebooks/01_ingest_and_normalize_genome.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jcollins-bioinfo/genome-evidence/blob/main/notebooks/01_ingest_and_normalize_genome.ipynb)
