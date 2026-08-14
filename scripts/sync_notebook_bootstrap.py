@@ -81,6 +81,14 @@ if PROFILE == "personal_drive":
         check=True,
         timeout=600,
     )
+    source_root = (CHECKOUT / "src").resolve()
+    package_init = source_root / "genome_evidence" / "__init__.py"
+    if not package_init.is_file():
+        raise RuntimeError("Resolved checkout does not contain the genome_evidence package")
+    source_path = str(source_root)
+    if source_path not in sys.path:
+        sys.path.insert(0, source_path)
+    importlib.invalidate_caches()
 else:
     RESOLVED_COMMIT = "installed-ci-package"
 

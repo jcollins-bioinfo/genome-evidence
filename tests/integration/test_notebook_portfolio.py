@@ -2,6 +2,7 @@ import ast
 import json
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -99,3 +100,73 @@ def test_personal_bootstrap_resolves_fetched_head_not_a_local_branch() -> None:
     assert source.index('importlib.import_module("genome_evidence")') > source.index(
         '"pip",\n            "install"'
     )
+
+
+def test_personal_bootstrap_imports_checkout_in_same_fresh_process(tmp_path: Path) -> None:
+    checkout = tmp_path / "checkout"
+    package = checkout / "src/genome_evidence"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text('__version__ = "0.1.0"\n')
+    metadata = checkout / "src/genome_evidence-0.1.0.dist-info"
+    metadata.mkdir()
+    (metadata / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: genome-evidence\nVersion: 0.1.0\n"
+    )
+    (checkout / "uv.lock").write_text("synthetic bootstrap test lock\n")
+
+    source = canonical_bootstrap().replace(
+        'CHECKOUT = Path("/content/genome-evidence-src")',
+        f"CHECKOUT = Path({str(checkout)!r})",
+    )
+    harness = tmp_path / "fresh_personal_bootstrap.py"
+    harness.write_text(
+        textwrap.dedent(
+            f"""
+            import json
+            import subprocess
+            import sys
+
+            repository_url = "https://github.com/jcollins-bioinfo/genome-evidence.git"
+            resolved_commit = "0123456789abcdef0123456789abcdef01234567"
+            calls = []
+
+            def fake_run(args, **kwargs):
+                calls.append(args)
+                if args[-3:] == ["remote", "get-url", "origin"]:
+                    stdout = repository_url + "\\n"
+                elif args[-2:] == ["status", "--porcelain"]:
+                    stdout = ""
+                elif args[-3:] == ["rev-parse", "--verify", "FETCH_HEAD^{{commit}}"]:
+                    stdout = resolved_commit + "\\n"
+                else:
+                    stdout = ""
+                return subprocess.CompletedProcess(args, 0, stdout=stdout)
+
+            subprocess.run = fake_run
+            namespace = {{
+                "PROFILE": "personal_drive",
+                "REPOSITORY_URL": repository_url,
+                "REPOSITORY_REF": "main",
+                "WORKSPACE_ROOT": "/not-used",
+                "SUBJECT_ID": "subject-0001",
+                "sys": sys,
+            }}
+            exec({source!r}, namespace)
+            status = namespace["BOOTSTRAP_STATUS"]
+            assert status["resolved_commit"] == resolved_commit
+            assert status["import_path"] == "src/genome_evidence/__init__.py"
+            assert any("pip" in call and "install" in call for call in calls)
+            print(json.dumps(status, sort_keys=True))
+            """
+        )
+    )
+
+    completed = subprocess.run(
+        [sys.executable, str(harness)],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    status = json.loads(completed.stdout.splitlines()[-1])
+    assert status["profile"] == "personal_drive"

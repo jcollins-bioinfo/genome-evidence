@@ -2,6 +2,13 @@
 
 The locked local environment and `synthetic_ci` nbmake CI are canonical. `personal_drive` uses checked private resources and never falls back to synthetic data. Colab runs on a Google-managed VM; use the local path when cloud processing is unacceptable. Opening a badge does not auto-run, mount Drive, grant access, create folders, or guarantee the lockfile environment.
 
+## Clean-runtime behavior
+
+- Notebook 00 can bootstrap a fresh Colab kernel, initialize the private workspace, and import one explicitly selected 23andMe inbox file.
+- Notebooks 01–03 currently validate the private workspace in personal mode but execute fabricated demonstrations; they do not yet consume private production inputs.
+- Notebooks 04–06 intentionally stop in personal mode until their explicit completed-run, reference-bundle, model, and tool prerequisites are configured. They never substitute synthetic resources for missing personal prerequisites.
+- CI executes the notebooks under the preinstalled `synthetic_ci` profile. The separate personal-bootstrap regression test covers source installation and same-process import in a fresh interpreter.
+
 | # | Role | Prerequisite | Repository | Colab |
 |---:|---|---|---|---|
 | 00 | initialize private workspace | None | [00_initialize_private_workspace.ipynb](00_initialize_private_workspace.ipynb) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jcollins-bioinfo/genome-evidence/blob/main/notebooks/00_initialize_private_workspace.ipynb) |
