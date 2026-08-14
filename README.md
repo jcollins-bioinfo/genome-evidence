@@ -38,6 +38,18 @@ These commands report aggregate status only. Use the public Python APIs `validat
 
 Notebook 00B provisions the production normalization resources required by the source imported in notebook 00. It retrieves exact rsID records from pinned UCSC dbSNP 155 indexes without transmitting genotype calls, verifies UCSC's published GRCh38 FASTA checksum, builds the FAI and any conservative variant-specific GRCh37→GRCh38 map, and writes provenance plus durable selectors into canonical Drive subdirectories. Notebook 01 consumes that selection, computes ephemerally, publishes re-hashed M1/M2 runs with last-written completion markers, and registers the latest compatible M2 run. Notebook 04 resolves that registration automatically and publishes M5 output when one reviewed local population bundle is installed.
 
+00B is restartable at operational boundaries. It writes privacy-safe progress both to the
+notebook cell and to
+`logs/notebooks/00b/<run-key>/events.jsonl`, while verified download and dbSNP-query
+checkpoints live under `cache/downloads/normalization/v1/<run-key>/`. Rerunning the
+provisioning cell verifies and reuses completed batches and downloaded bytes. Full-file
+transfers and byte-processing stages report byte rates and ETA; sparse remote BigBed
+queries report identifiers per second because the Kent utility does not expose truthful
+per-request byte telemetry. Last-written bundle and selector completion markers make
+pre-commit Drive/FUSE interruptions repairable without weakening post-commit
+immutability. A retained `hg38.fa.gz` checkpoint adds about 938 MiB to the
+approximately 3 GiB installed FASTA footprint, before smaller query checkpoints and logs.
+
 Every stage creates immutable, checksummed artifacts with source/input identities, configuration and algorithm identity, package/Git identity, and explicit schemas. Package versions, artifact schemas, project milestones, and external source releases are independent. See [architecture](docs/architecture.md), the [data model](docs/data-model.md), [PGx model documentation](docs/pharmacogenomics/model-and-evidence.md), [changelog](CHANGELOG.md), and [version policy](docs/development/versioning-and-releases.md).
 
 ## Notebooks
@@ -56,7 +68,7 @@ The [canonical notebook index](notebooks/README.md) lists all nine notebooks exa
 
 ## Development, versioning, and roadmap
 
-The package is pre-1.0 (`0.4.0` prepared): public APIs and schemas may evolve only under the documented compatibility/deprecation policy. This change adds resource-provisioning APIs and a versioned private selection schema without removing existing public contracts. It does not tag, publish, sign, or create a release. Follow the [roadmap](docs/roadmap.md), ADRs, documentation expectations in `AGENTS.md`, and MIT [license](LICENSE). Pharmacogenomic source acknowledgements and links are maintained in the PGx documentation; external labels remain attributed source vocabulary.
+The package is pre-1.0 (`0.4.1` prepared): public APIs and schemas may evolve only under the documented compatibility/deprecation policy. This patch makes 00B progress observable and its operational interruptions resumable, including the public `ProvisioningIncomplete` outcome, without weakening the existing resource-selection or provenance schemas. It does not tag, publish, sign, or create a release. Follow the [roadmap](docs/roadmap.md), ADRs, documentation expectations in `AGENTS.md`, and MIT [license](LICENSE). Pharmacogenomic source acknowledgements and links are maintained in the PGx documentation; external labels remain attributed source vocabulary.
 
 CI runs these locked gates:
 

@@ -5,12 +5,36 @@ The locked local environment and `synthetic_ci` nbmake CI are canonical. `person
 ## Clean-runtime behavior
 
 - Notebook 00 can bootstrap a fresh Colab kernel, initialize the private workspace, and import one explicitly selected 23andMe inbox file.
-- Notebook 00B downloads and validates the source-compatible dbSNP marker subset, GRCh38 FASTA/FAI, and any required variant-specific cross-build map into canonical Drive subdirectories; it persists provenance and selectors for later kernels.
+- Notebook 00B downloads and validates the source-compatible dbSNP marker subset, GRCh38 FASTA/FAI, and any required variant-specific cross-build map into canonical Drive subdirectories. It streams progress to the cell and a private JSONL log, checkpoints downloads and dbSNP batches, and persists provenance and selectors for later kernels only after every required artifact verifies.
 - Notebook 01 consumes the content-addressed source plus the durable 00B resource selection. It computes ephemerally, publishes checksum-verified M1/M2 runs to Drive, and registers the latest compatible M2 run.
 - Notebooks 02–03 still execute fabricated demonstrations in personal mode; they do not yet consume private production inputs.
 - Notebook 04 automatically resolves the latest compatible M2 run and publishes M5 output when exactly one reviewed population-reference bundle is installed.
 - Notebooks 05–07 stop when their required completed-run, reference-bundle, model, gene, or tool prerequisites are absent. No personal path substitutes synthetic resources.
 - CI executes the notebooks under the preinstalled `synthetic_ci` profile. The separate personal-bootstrap regression test covers source installation and same-process import in a fresh interpreter.
+
+## 00B progress and resumption
+
+During personal execution, 00B prints timestamped phase transitions, retries, aggregate
+counts, rates, and ETA directly below the provisioning cell. The same events are appended
+as structured JSON Lines to
+`logs/notebooks/00b/<run-key>/events.jsonl` in the private workspace. Logs contain
+aggregate marker counts, public resource metadata, operational paths, checksums, and
+diagnostics; they do not contain genotype calls, raw source rows, or individual marker
+identifiers.
+
+Durable state is stored under
+`cache/downloads/normalization/v1/<run-key>/`. A rerun validates each completion marker
+and checksum before reusing it. Successful dbSNP batches are not repeated, and an
+interrupted HTTP transfer continues from its retained `.part` bytes when the server
+honors the requested byte range. A partial gzip decompression restarts that transform
+from the retained, checksum-verified archive because gzip decoder state cannot safely be
+continued at an arbitrary output offset.
+
+If bounded network retries are exhausted, the cell prints
+`status: incomplete_resumable` plus its log and checkpoint paths instead of discarding
+verified work. Rerun the same provisioning cell. Configuration or integrity failures
+remain fail-closed: 00B does not publish `config/normalization_resources.json` until all
+required artifacts and provenance validate.
 
 | # | Role | Prerequisite | Repository | Colab |
 |---:|---|---|---|---|

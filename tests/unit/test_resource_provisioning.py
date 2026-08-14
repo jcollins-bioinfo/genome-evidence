@@ -1,10 +1,14 @@
 import gzip
+import io
+import json
 import subprocess
+from hashlib import md5
 from pathlib import Path
 
 import pytest
 
 import genome_evidence.workspace.resources as resource_module
+from genome_evidence.workspace.provisioning_progress import ProvisioningReporter
 from genome_evidence.workspace.resources import (
     BigBedVariant,
     SourceMarker,
@@ -103,6 +107,44 @@ def test_fasta_index_rejects_an_interior_short_line(tmp_path: Path) -> None:
         build_fasta_index(fasta, tmp_path / "bad.fa.fai")
 
 
+def test_fasta_provisioning_repairs_a_torn_completion_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = gzip.compress(b">chr1\nACGT\n")
+    monkeypatch.setattr(
+        resource_module,
+        "FASTA_UPSTREAM_MD5",
+        md5(payload, usedforsecurity=False).hexdigest(),
+    )
+    reporter = ProvisioningReporter(tmp_path / "events.jsonl", stream=io.StringIO())
+
+    def download(_url: str, destination: Path) -> None:
+        destination.write_bytes(payload)
+
+    fasta, index, manifest = resource_module._prepare_fasta(  # noqa: SLF001
+        tmp_path / "workspace",
+        tmp_path / "checkpoint",
+        download,
+        reporter,
+        sleep=lambda _seconds: None,
+    )
+    completed = fasta.parent / "COMPLETED.json"
+    completed.write_text("{", encoding="utf-8")
+
+    repaired_fasta, repaired_index, repaired_manifest = resource_module._prepare_fasta(  # noqa: SLF001
+        tmp_path / "workspace",
+        tmp_path / "checkpoint",
+        download,
+        reporter,
+        sleep=lambda _seconds: None,
+    )
+
+    assert repaired_fasta == fasta
+    assert repaired_index == index
+    assert repaired_manifest == manifest
+    assert json.loads(completed.read_text()) == manifest
+
+
 def test_kent_tool_probe_rejects_an_unrelated_executable(tmp_path: Path) -> None:
     root = tmp_path / "workspace"
     cached = root / "cache/tools/ucsc/kent-v479/bigBedNamedItems"
@@ -119,8 +161,98 @@ def test_kent_tool_probe_rejects_an_unrelated_executable(tmp_path: Path) -> None
 
     with pytest.raises(ValueError, match="expected bigBedNamedItems CLI"):
         resource_module._prepare_kent_tool(  # noqa: SLF001
-            root, work, unused_download, wrong_runner
+            root,
+            work,
+            unused_download,
+            wrong_runner,
+            ProvisioningReporter(tmp_path / "events.jsonl", stream=io.StringIO()),
+            sleep=lambda _seconds: None,
         )
+
+
+def test_query_batch_retries_and_rejects_malformed_zero_exit_output(tmp_path: Path) -> None:
+    tool = tmp_path / "bigBedNamedItems"
+    tool.write_bytes(b"synthetic")
+    reporter = ProvisioningReporter(tmp_path / "events.jsonl", stream=io.StringIO())
+    calls = 0
+
+    def runner(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        calls += 1
+        output = Path(args[-1])
+        output.write_text("malformed\n" if calls == 1 else "chr1\t1\t2\trs1\tC\t1\tG,\t0\n")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    output = resource_module._query_batch(  # noqa: SLF001
+        tool,
+        "a" * 64,
+        (resource_module.DBSNP_URLS["GRCh37"],),
+        "GRCh37",
+        ("rs1",),
+        tmp_path / "checkpoint",
+        tmp_path / "work",
+        runner,
+        reporter,
+        attempts=2,
+        timeout_seconds=60,
+        sleep=lambda _seconds: None,
+    )
+
+    assert calls == 2
+    assert "rs1" in output.read_text()
+    assert "rs1" not in reporter.log_path.read_text()
+
+
+def test_query_batch_resumes_a_persisted_split_without_repeating_parent(
+    tmp_path: Path,
+) -> None:
+    tool = tmp_path / "bigBedNamedItems"
+    tool.write_bytes(b"synthetic")
+    reporter = ProvisioningReporter(tmp_path / "events.jsonl", stream=io.StringIO())
+    identifiers = tuple(f"rs{index}" for index in range(1, 301))
+    queried_counts: list[int] = []
+
+    def failing_runner(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        queried_counts.append(len(Path(args[-2]).read_text().splitlines()))
+        return subprocess.CompletedProcess(
+            args,
+            255,
+            stdout="",
+            stderr="remote failure for rsSensitive",
+        )
+
+    arguments = (
+        tool,
+        "a" * 64,
+        (resource_module.DBSNP_URLS["GRCh37"],),
+        "GRCh37",
+        identifiers,
+        tmp_path / "checkpoint",
+        tmp_path / "work",
+        failing_runner,
+        reporter,
+    )
+    with pytest.raises(resource_module._OperationalInterruption):  # noqa: SLF001
+        resource_module._query_batch(  # noqa: SLF001
+            *arguments,
+            attempts=1,
+            timeout_seconds=60,
+            sleep=lambda _seconds: None,
+        )
+    assert queried_counts == [300, 150]
+
+    queried_counts.clear()
+    with pytest.raises(resource_module._OperationalInterruption):  # noqa: SLF001
+        resource_module._query_batch(  # noqa: SLF001
+            *arguments,
+            attempts=1,
+            timeout_seconds=60,
+            sleep=lambda _seconds: None,
+        )
+
+    assert queried_counts == [150]
+    assert "split.resume" in reporter.log_path.read_text()
+    assert "rsSensitive" not in reporter.log_path.read_text()
 
 
 def test_bigbed_value_model_is_immutable() -> None:

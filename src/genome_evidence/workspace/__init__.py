@@ -19,6 +19,7 @@ from .personal import (
 )
 from .resources import (
     NormalizationResourceSelection,
+    ProvisioningIncomplete,
     ProvisioningResult,
     provision_personal_normalization_resources,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "WorkspaceConfig",
     "PersonalNormalizationResult",
     "NormalizationResourceSelection",
+    "ProvisioningIncomplete",
     "ProvisioningResult",
     "import_23andme_source",
     "initialize_workspace",

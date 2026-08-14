@@ -16,7 +16,103 @@ Run notebook 00B after notebook 00 has imported exactly one content-addressed so
 - `references/manifests/normalization/<bundle>.json` with upstream identities, retrieval time, artifact hashes/sizes, and aggregate resolution counts; and
 - `config/normalization_resources.json`, a source-checksum-bound set of durable workspace-relative selectors consumed automatically by notebook 01.
 
-The GRCh38 archive is fetched from UCSC's fixed `hg38.fa.gz` endpoint and must match its published MD5 `1c9dcaddfa41027f17cd8f7a82c7293b` before decompression. Expect roughly 938 MB of network transfer and approximately 3 GB of durable Drive storage for FASTA plus FAI. The pinned Kent v479 `bigBedNamedItems` utility queries fixed UCSC dbSNP 155 hg19/hg38 BigBed indexes by rsID; genotype tokens are never written to the identifier list or transmitted. HTTPS range requests retrieve only indexed records needed for the source.
+Long-running operational state is separate from completed scientific resources:
+
+- `logs/notebooks/00b/<run-key>/events.jsonl` is the append-only, structured execution
+  log mirrored to notebook stdout;
+- `cache/downloads/normalization/v1/<run-key>/checkpoint.json` binds the checkpoint to
+  the selected source and pinned resource identities;
+- `cache/downloads/normalization/v1/<run-key>/dbsnp/<assembly>/<query-key>/` contains
+  checksum-verified aggregate and per-batch query checkpoints; and
+- `cache/downloads/normalization/v1/<run-key>/fasta/ucsc-hg38-gca_000001405.15/`
+  retains `hg38.fa.gz` or its resumable `.part` file;
+- `references/manifests/normalization/<bundle>.COMPLETED.json` commits a verified
+  immutable resource bundle only after every listed artifact and provenance file is
+  durable; and
+- `config/normalization_resources.PUBLISHING.json` identifies an interrupted selector
+  copy, while `config/normalization_resources.COMPLETED.json` is the last-written,
+  checksum-bound selector completion marker.
+
+The 24-character run key is deterministically derived from the private source checksum
+and pinned dbSNP, Kent, and FASTA identities. Checkpoint directories are therefore not
+reused across incompatible sources or pinned-resource changes. They remain private even
+though the retrieved dbSNP rows are public. Source-derived identifier-list files exist
+only in ephemeral Colab storage while a batch runs; Drive receives verified extracts and
+aggregate completion metadata, not the identifier lists.
+
+The GRCh38 archive is fetched from UCSC's fixed `hg38.fa.gz` endpoint and must match its published MD5 `1c9dcaddfa41027f17cd8f7a82c7293b` before decompression. The default checkpoint retains the roughly 938 MiB compressed archive in addition to approximately 3 GiB for the installed FASTA plus FAI. Plan for roughly 4 GiB of Drive usage plus smaller dbSNP checkpoints and logs; a preserved invalid archive can temporarily require another approximately 938 MiB. The checkpoint cache is evictable after a successful, checksum-valid selection, but removing it forfeits download and query resumption if provisioning must later be repeated.
+
+The pinned Kent v479 `bigBedNamedItems` utility queries fixed UCSC dbSNP 155 hg19/hg38 BigBed indexes by rsID; genotype tokens are never written to the identifier list or transmitted. HTTPS range requests retrieve only indexed records needed for the source. A GRCh37 source requires both a GRCh37 query and a GRCh38 target query; a GRCh38 source reuses its one completed query as the target extract.
+
+### Progress telemetry
+
+Every major step emits timestamped events to notebook stdout and the JSONL log: source
+validation, checkpoint discovery, Kent acquisition and validation, dbSNP batch planning,
+attempts, retries and adaptive splits, extract parsing, archive download and checksum
+verification, decompression, FASTA indexing, artifact publication, provenance, and final
+selection publication. Each JSONL line contains a UTC timestamp, severity, stable event
+name, human-readable message, and applicable structured fields. The log is mode `0600`
+where the filesystem honors POSIX permissions.
+
+Rates have stage-specific meanings:
+
+- direct downloads, hashing, decompression, indexing, and copies report bytes processed,
+  human-readable byte rates, percentage, elapsed time, and ETA when total size is known;
+- dbSNP BigBed work reports completed batches, identifiers processed, identifiers per
+  second, and ETA; and
+- no byte-download rate is claimed for BigBed queries because `bigBedNamedItems`
+  performs opaque sparse range reads and does not expose reliable transfer-byte
+  telemetry.
+
+The log deliberately excludes genotype calls, raw source rows, individual marker
+identifiers, and unsanitized identifier-bearing subprocess diagnostics. It is written to
+the private Drive workspace, not uploaded to an external logging service.
+
+### Retry and rerun semantics
+
+dbSNP identifiers are deterministically sorted, deduplicated, and queried in bounded
+batches. Each successful batch is parsed, checked against its requested identifier set,
+hashed, and completed with a manifest. Failed attempts use bounded backoff against the
+pinned UCSC endpoint and may be bisected into smaller batches.
+Partial output from a failed process is never classified as a completed query. An
+identifier absent from a successfully completed query may remain unresolved; an
+uncompleted query is an operational failure, not biological missingness.
+
+HTTP downloads retain `.part` bytes and request the remaining range on retry. A resumed
+response is appended only when the server returns a matching partial-content range;
+otherwise that file restarts from byte zero. Completed FASTA archive bytes are verified
+against UCSC's published MD5 and a recorded SHA-256 before use. Gzip decompression cannot
+safely resume from arbitrary decoder state, so only that transform restarts while the
+verified archive remains cached. Completed decompressed FASTA and dbSNP checkpoints are
+checksum-verified before reuse.
+
+Bounded network or workspace-I/O exhaustion becomes `ProvisioningIncomplete`; notebook
+00B prints `status: incomplete_resumable`, the durable log and checkpoint paths, and the
+instruction to rerun the cell. A rerun reconstructs the same run key, validates existing
+components, and continues at the first incomplete unit. Configuration conflicts,
+unexpected data, checksum mismatches, unsafe paths, or incompatible completed resources
+remain errors. Tolerance never means accepting corrupt or scientifically incomplete
+resources. Before a bundle completion marker exists, torn workflow-owned output files
+may be repaired from their verified checkpoints. After that marker exists, bundle files
+are immutable and any mismatch fails closed. Selector staging is similarly repairable
+only while its `PUBLISHING` marker exists; the checksum-validated `COMPLETED` marker is
+written last. No workflow step assumes that a Drive FUSE rename is an atomic commit.
+
+### Optional 00B controls
+
+Defaults are intended for ordinary Colab execution. Increase batch size only when the
+connection and runtime are stable; smaller batches provide finer checkpoints at greater
+process overhead.
+
+| Environment variable | Default | Accepted range | Effect |
+|---|---:|---:|---|
+| `GENOME_EVIDENCE_DBSNP_BATCH_SIZE` | `5000` | 250–25,000 | Maximum rsIDs in an initial Kent query batch |
+| `GENOME_EVIDENCE_QUERY_ATTEMPTS` | `4` | 1–10 | Attempts per dbSNP batch before adaptive splitting or resumable pause |
+| `GENOME_EVIDENCE_QUERY_TIMEOUT_SECONDS` | `900` | 60–3,600 | Timeout for one Kent query attempt |
+
+The existing selectors still apply: `GENOME_EVIDENCE_SOURCE_SHA256` chooses one imported
+source when more than one exists, and `GENOME_EVIDENCE_SOURCE_BUILD` supplies `GRCh37` or
+`GRCh38` only after independent verification when the vendor header is insufficient.
 
 Definitions require exact rsID, chromosome, one-based position, and source assembly agreement. 23andMe documents its GRCh37/GRCh38 raw genotypes on the reference plus strand, so accepted source rows receive `orientation=none` with the vendor assertion URL retained in provenance. Non-rsID markers, absent placements, coordinate disagreements, non-SNV alleles, strand/allele incompatibilities, and ambiguous placements remain unresolved. The GRCh37→GRCh38 map uses only same-rsID placements with identical plus-strand REF and compatible ALT; it is deliberately more conservative than a generic interval liftover.
 
