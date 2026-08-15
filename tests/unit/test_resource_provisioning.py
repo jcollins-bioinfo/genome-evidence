@@ -2,6 +2,7 @@ import gzip
 import io
 import json
 import subprocess
+import threading
 from hashlib import md5
 from pathlib import Path
 
@@ -259,3 +260,51 @@ def test_bigbed_value_model_is_immutable() -> None:
     value = BigBedVariant("1", 1, "rs1", "A", ("G",))
     with pytest.raises(AttributeError):
         value.position = 2  # type: ignore[misc]
+
+
+def test_full_fallback_batches_overlap_with_isolated_worker_caches(tmp_path: Path) -> None:
+    tool = tmp_path / "bigBedNamedItems"
+    tool.write_bytes(b"synthetic")
+    identifiers = tuple(f"rs{index}" for index in range(500))
+    barrier = threading.Barrier(2)
+    lock = threading.Lock()
+    active = 0
+    maximum = 0
+    tmpdirs: set[str] = set()
+
+    def runner(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal active, maximum
+        environment = kwargs["env"]
+        assert isinstance(environment, dict)
+        tmpdirs.add(str(environment["TMPDIR"]))
+        with lock:
+            active += 1
+            maximum = max(maximum, active)
+        barrier.wait(timeout=2)
+        Path(args[-1]).write_text("")
+        with lock:
+            active -= 1
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    output = resource_module._query_bigbed_in_batches(  # noqa: SLF001
+        tool,
+        "a" * 64,
+        (resource_module.DBSNP_URLS["GRCh37"],),
+        "GRCh37",
+        identifiers,
+        tmp_path / "checkpoint",
+        tmp_path / "work",
+        runner,
+        ProvisioningReporter(tmp_path / "events.jsonl", stream=io.StringIO()),
+        batch_size=250,
+        attempts=1,
+        timeout_seconds=60,
+        sleep=lambda _seconds: None,
+        label="synthetic",
+        workers=2,
+    )
+
+    assert output.read_text() == ""
+    assert maximum == 2
+    assert len(tmpdirs) == 2
+    assert all((Path(directory) / "udcCache").is_dir() for directory in tmpdirs)

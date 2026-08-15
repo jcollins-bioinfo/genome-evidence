@@ -42,7 +42,9 @@ aggregate completion metadata, not the identifier lists.
 
 The GRCh38 archive is fetched from UCSC's fixed `hg38.fa.gz` endpoint and must match its published MD5 `1c9dcaddfa41027f17cd8f7a82c7293b` before decompression. The default checkpoint retains the roughly 938 MiB compressed archive in addition to approximately 3 GiB for the installed FASTA plus FAI. Plan for roughly 4 GiB of Drive usage plus smaller dbSNP checkpoints and logs; a preserved invalid archive can temporarily require another approximately 938 MiB. The checkpoint cache is evictable after a successful, checksum-valid selection, but removing it forfeits download and query resumption if provisioning must later be repeated.
 
-The pinned Kent v479 `bigBedNamedItems` utility queries fixed UCSC dbSNP 155 hg19/hg38 BigBed indexes by rsID; genotype tokens are never written to the identifier list or transmitted. HTTPS range requests retrieve only indexed records needed for the source. A GRCh37 source requires both a GRCh37 query and a GRCh38 target query; a GRCh38 source reuses its one completed query as the target extract.
+The pinned Kent v479 `bigBedNamedItems` utility first queries local copies of the pinned hg19/hg38 `dbSnp155Common.bb` files. Durable, identity-bound range segments live below the private normalization checkpoint; a verified assembled copy is materialized in ephemeral `/content` for fast queries. The complete 65/68 GiB files are **never downloaded**. Only common-missing rsIDs are sent to their pinned remote indexes. Common absence is not dbSNP absence: every unresolved identifier requires a successfully completed full-index fallback. Genotype tokens are never written to query lists or transmitted.
+
+Plan for roughly 3.6 GiB of additional Drive checkpoint space for both common files on a GRCh37 run, plus approximately 1.8 GiB per required local common copy while active. Before transfer, 00B reports Drive and local free space. Segment files are the durable copy; local assembled/query files are ephemeral. A temporary assembled durable file can coexist during validation, so retain headroom. Drive rename atomicity is not used as a commit boundary: each segment and final resource has a last-written, checksum-bound completion manifest.
 
 ### Progress telemetry
 
@@ -109,6 +111,12 @@ process overhead.
 | `GENOME_EVIDENCE_DBSNP_BATCH_SIZE` | `5000` | 250–25,000 | Maximum rsIDs in an initial Kent query batch |
 | `GENOME_EVIDENCE_QUERY_ATTEMPTS` | `4` | 1–10 | Attempts per dbSNP batch before adaptive splitting or resumable pause |
 | `GENOME_EVIDENCE_QUERY_TIMEOUT_SECONDS` | `900` | 60–3,600 | Timeout for one Kent query attempt |
+| `GENOME_EVIDENCE_DBSNP_WORKERS` | `6` | 1–12 | Global cap for full-index Kent subprocesses; `1` is serial |
+| `GENOME_EVIDENCE_COMMON_DOWNLOAD_SEGMENTS` | `8` | 1–12 | Concurrent HTTP ranges across common downloads |
+
+Each persistent fallback worker reuses only its own local `TMPDIR/udcCache`; caches are never shared. Retries remain bounded and jittered, and adaptive splitting preserves completed child checkpoints. Existing v1 batch manifests are validated against their input digest, assembly, URL, tool identity, output hash/size/count, and returned-ID subset before reuse. Invalid checkpoints are ignored without logging identifiers.
+
+The expected speedup is substantial but not guaranteed: local common hits avoid latency-bound random remote reads, while the remaining independent full queries overlap up to the configured bound. These factors are multiplicative in the ordinary performance sense, not mathematically exponential. Actual improvement depends on the common-hit fraction, UCSC/network behavior, and Colab storage throughput; telemetry reports measured rates and never invents byte rates for Kent sparse queries.
 
 The existing selectors still apply: `GENOME_EVIDENCE_SOURCE_SHA256` chooses one imported
 source when more than one exists, and `GENOME_EVIDENCE_SOURCE_BUILD` supplies `GRCh37` or

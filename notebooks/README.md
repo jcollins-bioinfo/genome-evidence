@@ -14,6 +14,14 @@ The locked local environment and `synthetic_ci` nbmake CI are canonical. `person
 
 ## 00B progress and resumption
 
+00B uses **common-first + bounded-parallel fallback**. It downloads pinned common
+BigBeds with 8 resumable segments by default, queries verified local copies, then sends
+only unresolved identifiers to the complete remote indexes with 6 isolated-cache Kent
+workers. Configure `GENOME_EVIDENCE_COMMON_DOWNLOAD_SEGMENTS` and
+`GENOME_EVIDENCE_DBSNP_WORKERS` from 1–12; use `1` for serial behavior. The complete
+65/68 GiB BigBeds are never downloaded. Restart the runtime and rerun the same cell after
+an interruption—do not delete the checkpoint.
+
 During personal execution, 00B prints timestamped phase transitions, retries, aggregate
 counts, rates, and ETA directly below the provisioning cell. The same events are appended
 as structured JSON Lines to

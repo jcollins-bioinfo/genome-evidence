@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -59,6 +60,7 @@ class ProvisioningReporter:
         self._clock = clock
         self._interval = progress_interval_seconds
         self._last_progress: dict[str, float] = {}
+        self._lock = threading.RLock()
         self._log_available = True
         self._log_error_reported = False
         try:
@@ -71,6 +73,10 @@ class ProvisioningReporter:
                 os.chmod(log_path, 0o600)
 
     def event(self, level: str, event: str, message: str, **fields: Any) -> None:
+        with self._lock:
+            self._event_locked(level, event, message, **fields)
+
+    def _event_locked(self, level: str, event: str, message: str, **fields: Any) -> None:
         timestamp = datetime.now(UTC).isoformat()
         record = {
             "timestamp": timestamp,
@@ -137,10 +143,11 @@ class ProvisioningReporter:
         force: bool = False,
         **fields: Any,
     ) -> None:
-        now = self._clock()
-        if not force and now - self._last_progress.get(event, float("-inf")) < self._interval:
-            return
-        self._last_progress[event] = now
+        with self._lock:
+            now = self._clock()
+            if not force and now - self._last_progress.get(event, float("-inf")) < self._interval:
+                return
+            self._last_progress[event] = now
         elapsed = max(now - started_at, 1e-9)
         session_completed = max(completed - initial_completed, 0)
         rate = session_completed / elapsed
