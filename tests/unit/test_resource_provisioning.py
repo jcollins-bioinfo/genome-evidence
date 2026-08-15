@@ -85,6 +85,8 @@ def test_bigbed_parser_and_resource_builder_are_exact_and_fail_closed() -> None:
         "definition_count": 3,
         "cross_build_mapped_marker_count": 2,
         "exact_source_placement_count": 2,
+        "ambiguous_marker_count": 0,
+        "unsupported_marker_count": 0,
     }
 
 
@@ -601,3 +603,57 @@ def test_full_fallback_batches_overlap_with_isolated_worker_caches(tmp_path: Pat
     assert maximum == 2
     assert len(tmpdirs) == 2
     assert all((Path(directory) / "udcCache").is_dir() for directory in tmpdirs)
+
+
+def test_bounded_local_queries_common_then_only_unresolved_clinvar(tmp_path: Path) -> None:
+    tool = tmp_path / "bigBedNamedItems"
+    tool.write_bytes(b"synthetic")
+    contacted: list[str] = []
+    queried: dict[str, list[str]] = {}
+
+    def download(url: str, destination: Path) -> None:
+        contacted.append(url)
+        destination.write_bytes(url.encode())
+
+    def runner(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        output = Path(args[-1])
+        ids = Path(args[3]).read_text().splitlines()
+        track = Path(args[2]).name
+        queried[track] = ids
+        if track == "dbSnp155Common.bb":
+            output.write_text("chr1\t0\t1\trs1\tA\t1\tC,\t0\n")
+        else:
+            output.write_text("chr1\t1\t2\trs2\tG\t1\tT,\t0\n")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    reporter = ProvisioningReporter(tmp_path / "events.jsonl", stream=io.StringIO())
+    output, provenance = resource_module._query_bounded_local_tracks(  # noqa: SLF001
+        tool,
+        sha256(tool.read_bytes()).hexdigest(),
+        "GRCh37",
+        ("rs1", "rs2"),
+        tmp_path / "checkpoint",
+        tmp_path / "work",
+        runner,
+        reporter,
+        download=download,
+        batch_size=250,
+        attempts=1,
+        timeout_seconds=60,
+        download_segments=1,
+        sleep=lambda _seconds: None,
+        label="grch37",
+    )
+
+    assert queried["dbSnp155Common.bb"] == ["rs1", "rs2"]
+    assert queried["dbSnp155ClinVar.bb"] == ["rs2"]
+    assert set(contacted) == {
+        resource_module.DBSNP_COMMON_URLS["GRCh37"],
+        resource_module.DBSNP_CLINVAR_URLS["GRCh37"],
+    }
+    assert not set(contacted) & set(resource_module.DBSNP_URLS.values())
+    assert provenance["complete_remote_queried"] is False
+    assert [row.marker_id for row in resource_module.parse_bigbed_variants(output.read_text())] == [
+        "rs1",
+        "rs2",
+    ]

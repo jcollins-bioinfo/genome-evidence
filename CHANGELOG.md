@@ -1,6 +1,9 @@
 # Changelog
 
-## 0.4.5 - Unreleased
+## 0.5.0 - Unreleased
+
+- Make `bounded_local_v1` the default normalization provisioning policy, add local ClinVar supplementation, explicit unresolved artifacts, an 80% source-placement guard, and policy-bound provenance/selectors.
+
 
 - Bind dbSNP query checkpoint v2 manifests to explicit, stable resource identities rather
   than runtime-local Kent execution paths. Narrowly validate and migrate compatible v1
