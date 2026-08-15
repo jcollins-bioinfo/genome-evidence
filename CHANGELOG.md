@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.2 - Unreleased
+
+- Replace serial complete-dbSNP extraction with local common-dbSNP-first querying and a
+  globally bounded, isolated-cache full-index fallback.
+- Add identity-bound segmented HTTP downloads, durable segment completion manifests,
+  safe single-stream fallback, concurrent privacy-safe reporting, and deterministic merge.
+- Preserve the public selector schema and conservative normalization semantics while
+  recording the new algorithm, common identities, outputs, and worker configuration.
+
 This project follows [Keep a Changelog](https://keepachangelog.com/) structure.
 
 ## [Unreleased]

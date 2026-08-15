@@ -3,12 +3,15 @@
 import gzip
 import json
 import os
+import random
 import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import md5, sha256
@@ -23,6 +26,7 @@ from genome_evidence.workspace.provisioning_progress import (
     Sleeper,
     resumable_download,
 )
+from genome_evidence.workspace.segmented_download import segmented_download
 
 DBSNP_BUILD = "155"
 DBSNP_URLS = {
@@ -30,6 +34,10 @@ DBSNP_URLS = {
     "GRCh38": "https://hgdownload.soe.ucsc.edu/gbdb/hg38/snp/dbSnp155.bb",
 }
 DBSNP_QUERY_URLS = {assembly: (url,) for assembly, url in DBSNP_URLS.items()}
+DBSNP_COMMON_URLS = {
+    "GRCh37": "https://hgdownload.soe.ucsc.edu/gbdb/hg19/snp/dbSnp155Common.bb",
+    "GRCh38": "https://hgdownload.soe.ucsc.edu/gbdb/hg38/snp/dbSnp155Common.bb",
+}
 FASTA_URL = "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz"
 FASTA_UPSTREAM_MD5 = "1c9dcaddfa41027f17cd8f7a82c7293b"
 KENT_VERSION = "479"
@@ -49,12 +57,14 @@ QUERY_SPLIT_SCHEMA = "genome-evidence-dbsnp-query-split/v1"
 BUNDLE_COMPLETION_SCHEMA = "genome-evidence-normalization-resource-bundle-completion/v1"
 SELECTION_PUBLICATION_SCHEMA = "genome-evidence-normalization-selection-publication/v1"
 SELECTION_COMPLETION_SCHEMA = "genome-evidence-normalization-selection-completion/v1"
-RESOURCE_ALGORITHM_VERSION = "genome-evidence-normalization-resource-builder/v2"
+RESOURCE_ALGORITHM_VERSION = "genome-evidence-normalization-resource-builder/v3-common-parallel"
 _BUILD_PATTERN = re.compile(r"(?:build|assembly)[\s:=]+(GRCh\d+|hg\d+|37|38)\b", re.IGNORECASE)
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _RSID = re.compile(r"^rs\d+$")
 _DEFAULT_BATCH_SIZE = 5_000
 _DEFAULT_QUERY_ATTEMPTS = 4
+_DEFAULT_DBSNP_WORKERS = 6
+_DEFAULT_DOWNLOAD_SEGMENTS = 8
 _MIN_SPLIT_BATCH_SIZE = 250
 
 
@@ -731,7 +741,11 @@ def _run_query_with_heartbeat(
     attempt: int,
     split_depth: int,
     timeout_seconds: int,
+    worker_tmp: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    process_environment = None
+    if worker_tmp is not None:
+        process_environment = {**os.environ, "TMPDIR": str(worker_tmp)}
     if runner is not subprocess.run:
         return runner(
             arguments,
@@ -739,6 +753,7 @@ def _run_query_with_heartbeat(
             capture_output=True,
             text=True,
             timeout=timeout_seconds,
+            env=process_environment,
         )
     started_at = time.monotonic()
     process = subprocess.Popen(  # noqa: S603 - pinned local utility and fixed arguments
@@ -746,6 +761,7 @@ def _run_query_with_heartbeat(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        env=process_environment,
     )
     try:
         while True:
@@ -802,6 +818,7 @@ def _query_batch(
     timeout_seconds: int,
     sleep: Sleeper,
     split_depth: int = 0,
+    worker_tmp: Path | None = None,
 ) -> Path:
     payload = "\n".join(identifiers) + "\n"
     identifiers_sha256 = sha256(payload.encode("ascii")).hexdigest()
@@ -878,6 +895,7 @@ def _query_batch(
                 attempt=attempt,
                 split_depth=split_depth,
                 timeout_seconds=timeout_seconds,
+                worker_tmp=worker_tmp,
             )
             if process.returncode == 0 and temporary.is_file():
                 validation_error_type: str | None = None
@@ -906,7 +924,7 @@ def _query_batch(
                     )
                     temporary.unlink(missing_ok=True)
                     if attempt < attempts:
-                        delay = min(2 ** (attempt - 1), 30)
+                        delay = min(2 ** (attempt - 1), 30) + random.uniform(0.0, 1.0)
                         reporter.info(
                             "dbsnp.batch.backoff",
                             f"Retrying this query batch in {delay} seconds.",
@@ -970,7 +988,7 @@ def _query_batch(
             split_depth=split_depth,
         )
         if attempt < attempts:
-            delay = min(2 ** (attempt - 1), 30)
+            delay = min(2 ** (attempt - 1), 30) + random.uniform(0.0, 1.0)
             reporter.info(
                 "dbsnp.batch.backoff",
                 f"Retrying this query batch in {delay} seconds.",
@@ -1020,6 +1038,7 @@ def _query_batch(
                 timeout_seconds=timeout_seconds,
                 sleep=sleep,
                 split_depth=split_depth + 1,
+                worker_tmp=worker_tmp,
             ),
             _query_batch(
                 tool,
@@ -1035,6 +1054,7 @@ def _query_batch(
                 timeout_seconds=timeout_seconds,
                 sleep=sleep,
                 split_depth=split_depth + 1,
+                worker_tmp=worker_tmp,
             ),
         )
         split_temporary = scratch / "split-records.bed.part"
@@ -1088,6 +1108,7 @@ def _query_bigbed_in_batches(
     timeout_seconds: int,
     sleep: Sleeper,
     label: str,
+    workers: int = 1,
 ) -> Path:
     all_payload = "\n".join(identifiers) + "\n"
     all_sha256 = sha256(all_payload.encode("ascii")).hexdigest()
@@ -1151,39 +1172,64 @@ def _query_bigbed_in_batches(
     completed_identifiers = resumed_identifiers
     completed_batches = resumed_batches
     outputs: list[Path | None] = [None] * len(batches)
-    for index, batch, batch_directory, valid in batch_specs:
+    local = threading.local()
+    worker_counter = iter(range(workers))
+    worker_lock = threading.Lock()
+
+    def run(spec: tuple[int, Sequence[str], Path, Path | None]) -> tuple[int, Path, int]:
+        index, batch, batch_directory, valid = spec
         if valid is not None:
-            outputs[index] = valid
-            continue
-        batch_output = _query_batch(
+            return index, valid, 0
+        if not hasattr(local, "work"):
+            with worker_lock:
+                worker_index = next(worker_counter)
+            local.work = work / "kent-workers" / f"worker-{worker_index:02d}"
+            local.work.mkdir(parents=True, exist_ok=True)
+            (local.work / "udcCache").mkdir(exist_ok=True)
+        result = _query_batch(
             tool,
             tool_sha256,
             urls,
             assembly,
             batch,
             batch_directory,
-            work,
+            local.work,
             runner,
             reporter,
             attempts=attempts,
             timeout_seconds=timeout_seconds,
             sleep=sleep,
+            worker_tmp=local.work,
         )
-        outputs[index] = batch_output
-        completed_identifiers += len(batch)
-        completed_batches += 1
-        reporter.progress(
-            f"dbsnp.{label}.progress",
-            f"dbSNP {label} query ({completed_batches:,}/{len(batches):,} batches)",
-            completed_identifiers,
-            len(identifiers),
-            unit="identifiers",
-            started_at=started_at,
-            initial_completed=resumed_identifiers,
-            force=True,
-            completed_batches=completed_batches,
-            total_batches=len(batches),
-        )
+        return index, result, len(batch)
+
+    pending = [spec for spec in batch_specs if spec[3] is None]
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="dbsnp-fallback") as pool:
+        futures = [pool.submit(run, spec) for spec in pending]
+        try:
+            for future in as_completed(futures):
+                index, batch_output, count = future.result()
+                outputs[index] = batch_output
+                completed_identifiers += count
+                completed_batches += 1
+                reporter.progress(
+                    f"dbsnp.{label}.progress",
+                    f"dbSNP {label} query ({completed_batches:,}/{len(batches):,} batches)",
+                    completed_identifiers,
+                    len(identifiers),
+                    unit="identifiers",
+                    started_at=started_at,
+                    initial_completed=resumed_identifiers,
+                    force=True,
+                    completed_batches=completed_batches,
+                    total_batches=len(batches),
+                    configured_workers=workers,
+                    active_workers=min(workers, len(futures)),
+                )
+        except BaseException:
+            for future in futures:
+                future.cancel()
+            raise
     directory.mkdir(parents=True, exist_ok=True)
     temporary = work / "dbsnp-combine" / f"{query_key}.bed.part"
     temporary.parent.mkdir(parents=True, exist_ok=True)
@@ -1228,6 +1274,184 @@ def _query_bigbed_in_batches(
         output=str(output),
     )
     return output
+
+
+def _merge_query_outputs(paths: Sequence[Path], destination: Path) -> Path:
+    """Merge validated BED rows independent of worker completion order."""
+    rows: set[str] = set()
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        parse_bigbed_variants(text)
+        rows.update(line for line in text.splitlines() if line)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    _write_text(destination, "".join(f"{line}\n" for line in sorted(rows)))
+    return destination
+
+
+def _query_common_first(
+    tool: Path,
+    tool_sha256: str,
+    assembly: str,
+    identifiers: Sequence[str],
+    checkpoint_root: Path,
+    work: Path,
+    runner: Runner,
+    reporter: ProvisioningReporter,
+    *,
+    download: Download | None,
+    batch_size: int,
+    attempts: int,
+    timeout_seconds: int,
+    workers: int,
+    download_segments: int,
+    sleep: Sleeper,
+    label: str,
+) -> tuple[Path, dict[str, Any]]:
+    """Use a local common BigBed as a non-authoritative accelerator, then full fallback."""
+    common_cache = checkpoint_root / "common" / assembly.lower() / "dbSnp155Common.bb"
+    common_manifest: dict[str, Any] | None = None
+    common_output: Path | None = None
+    try:
+        if download is None:
+            common_cache, common_manifest = segmented_download(
+                DBSNP_COMMON_URLS[assembly],
+                common_cache,
+                reporter,
+                concurrency=download_segments,
+                attempts=attempts,
+                timeout_seconds=timeout_seconds,
+                sleep=sleep,
+            )
+        else:
+            _obtain_download(
+                DBSNP_COMMON_URLS[assembly], common_cache, download, reporter, sleep=sleep
+            )
+            common_manifest = {
+                "remote_identity": {"canonical_url": DBSNP_COMMON_URLS[assembly]},
+                "sha256": _hash(common_cache),
+                "byte_size": common_cache.stat().st_size,
+                "segment_concurrency": 0,
+            }
+        local_common = work / "common" / assembly.lower() / common_cache.name
+        local_common.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(common_cache, local_common)
+        if _hash(local_common) != common_manifest["sha256"]:
+            raise OSError("local common dbSNP copy failed checksum verification")
+        common_output = _query_bigbed_in_batches(
+            tool,
+            tool_sha256,
+            (str(local_common),),
+            assembly,
+            identifiers,
+            checkpoint_root / "common-query",
+            work,
+            runner,
+            reporter,
+            batch_size=batch_size,
+            attempts=attempts,
+            timeout_seconds=timeout_seconds,
+            sleep=sleep,
+            label=f"{label}-common",
+            workers=1,
+        )
+        common_rows = parse_bigbed_variants(common_output.read_text(encoding="utf-8"))
+        returned = {row.marker_id for row in common_rows}
+        unresolved = tuple(identifier for identifier in identifiers if identifier not in returned)
+        reporter.success(
+            f"dbsnp.{label}.common.complete",
+            f"Local common dbSNP returned {len(returned):,} identifiers; "
+            f"{len(unresolved):,} require full fallback.",
+            common_hit_count=len(returned),
+            full_fallback_count=len(unresolved),
+        )
+    except Exception as error:
+        reporter.warning(
+            f"dbsnp.{label}.common.unavailable",
+            "Common dbSNP could not be validated; safely querying every identifier "
+            "against the full pinned index.",
+            error_type=type(error).__name__,
+            full_fallback_count=len(identifiers),
+        )
+        common_output = None
+        unresolved = tuple(identifiers)
+        common_manifest = {"status": "unavailable", "canonical_url": DBSNP_COMMON_URLS[assembly]}
+    # v1 placed full-query batches directly below dbsnp/<assembly>/<query-key>. Rebuild
+    # that deterministic plan and accept only independently valid completion manifests.
+    legacy_outputs: list[Path] = []
+    legacy_covered: set[str] = set()
+    legacy_parent = checkpoint_root / label
+    legacy_query_key = sha256(
+        f"{DBSNP_URLS[assembly]}|{tool_sha256}|{batch_size}|"
+        f"{sha256(('\n'.join(identifiers) + '\n').encode('ascii')).hexdigest()}".encode("ascii")
+    ).hexdigest()[:24]
+    for index, batch_start in enumerate(range(0, len(identifiers), batch_size)):
+        batch = identifiers[batch_start : batch_start + batch_size]
+        payload = "\n".join(batch) + "\n"
+        batch_digest = sha256(payload.encode("ascii")).hexdigest()
+        candidate = (
+            legacy_parent / legacy_query_key / "batches" / f"{index:05d}-{batch_digest[:12]}"
+        )
+        valid = _valid_query_checkpoint(
+            candidate,
+            identifiers=batch,
+            identifiers_sha256=batch_digest,
+            assembly=assembly,
+            canonical_url=DBSNP_URLS[assembly],
+            tool_sha256=tool_sha256,
+        )
+        if valid is not None:
+            legacy_outputs.append(valid)
+            legacy_covered.update(batch)
+    if legacy_covered:
+        unresolved = tuple(
+            identifier for identifier in unresolved if identifier not in legacy_covered
+        )
+        reporter.info(
+            f"dbsnp.{label}.legacy.resume",
+            f"Reused {len(legacy_outputs):,} verified legacy full-query batches.",
+            resumed_legacy_batches=len(legacy_outputs),
+            resumed_legacy_identifiers=len(legacy_covered),
+        )
+    fallback = None
+    if unresolved:
+        fallback = _query_bigbed_in_batches(
+            tool,
+            tool_sha256,
+            DBSNP_QUERY_URLS[assembly],
+            assembly,
+            unresolved,
+            checkpoint_root / "fallback",
+            work,
+            runner,
+            reporter,
+            batch_size=batch_size,
+            attempts=attempts,
+            timeout_seconds=timeout_seconds,
+            sleep=sleep,
+            label=f"{label}-full",
+            workers=workers,
+        )
+        reporter.info(
+            f"dbsnp.{label}.resume",
+            "Verified fallback checkpoints were incorporated where available.",
+            full_fallback_count=len(unresolved),
+        )
+    merged = checkpoint_root / "merged" / f"{label}.bed"
+    paths = [path for path in (common_output, *legacy_outputs, fallback) if path is not None]
+    _merge_query_outputs(paths, merged)
+    return merged, {
+        "common": common_manifest,
+        "common_output": (
+            {"sha256": _hash(common_output), "byte_size": common_output.stat().st_size}
+            if common_output
+            else None
+        ),
+        "full_url": DBSNP_URLS[assembly],
+        "common_hit_count": len(identifiers) - len(unresolved),
+        "full_fallback_count": len(unresolved),
+        "legacy_batch_count": len(legacy_outputs),
+        "workers": workers,
+    }
 
 
 def _prepare_kent_tool(
@@ -1826,6 +2050,26 @@ def provision_personal_normalization_resources(
                 60,
                 3600,
             )
+            dbsnp_workers = _configured_int(
+                env, "GENOME_EVIDENCE_DBSNP_WORKERS", _DEFAULT_DBSNP_WORKERS, 1, 12
+            )
+            download_segments = _configured_int(
+                env,
+                "GENOME_EVIDENCE_COMMON_DOWNLOAD_SEGMENTS",
+                _DEFAULT_DOWNLOAD_SEGMENTS,
+                1,
+                12,
+            )
+            drive_free = shutil.disk_usage(root).free
+            local_free = shutil.disk_usage(temporary_parent or tempfile.gettempdir()).free
+            reporter.info(
+                "strategy.configured",
+                "Strategy: common-first + bounded-parallel fallback. Interrupted work is reusable.",
+                configured_workers=dbsnp_workers,
+                download_segment_concurrency=download_segments,
+                drive_free_bytes=drive_free,
+                local_free_bytes=local_free,
+            )
             state_path = checkpoint_root / "checkpoint.json"
             if state_path.is_symlink():
                 raise ValueError("resource checkpoint identity path is unsafe")
@@ -1962,10 +2206,9 @@ def provision_personal_normalization_resources(
                     reporter,
                     sleep=sleep,
                 )
-                source_bed = _query_bigbed_in_batches(
+                source_bed, source_query_provenance = _query_common_first(
                     tool,
                     tool_sha256,
-                    DBSNP_QUERY_URLS[source_assembly],
                     source_assembly,
                     identifiers,
                     checkpoint_root / "dbsnp",
@@ -1977,14 +2220,17 @@ def provision_personal_normalization_resources(
                     timeout_seconds=query_timeout,
                     sleep=sleep,
                     label=source_assembly.lower(),
+                    workers=dbsnp_workers,
+                    download_segments=download_segments,
+                    download=download,
                 )
-                target_bed = (
-                    source_bed
-                    if source_assembly == "GRCh38"
-                    else _query_bigbed_in_batches(
+                if source_assembly == "GRCh38":
+                    target_bed = source_bed
+                    target_query_provenance = source_query_provenance
+                else:
+                    target_bed, target_query_provenance = _query_common_first(
                         tool,
                         tool_sha256,
-                        DBSNP_QUERY_URLS["GRCh38"],
                         "GRCh38",
                         identifiers,
                         checkpoint_root / "dbsnp",
@@ -1996,8 +2242,10 @@ def provision_personal_normalization_resources(
                         timeout_seconds=query_timeout,
                         sleep=sleep,
                         label="grch38",
+                        workers=dbsnp_workers,
+                        download_segments=download_segments,
+                        download=download,
                     )
-                )
                 reporter.info(
                     "dbsnp.parse",
                     "Parsing and validating the completed source and target extracts.",
@@ -2031,6 +2279,8 @@ def provision_personal_normalization_resources(
                         f"{source_digest}|dbSNP{DBSNP_BUILD}|{tool_sha256}|"
                         f"{source_extract_sha256}|{target_extract_sha256}|"
                         f"{fasta_manifest['fasta_sha256']}|{RESOURCE_ALGORITHM_VERSION}"
+                        f"|{json.dumps(source_query_provenance, sort_keys=True)}"
+                        f"|{json.dumps(target_query_provenance, sort_keys=True)}"
                     ).encode()
                 ).hexdigest()[:24]
                 marker_dir = (
@@ -2139,6 +2389,10 @@ def provision_personal_normalization_resources(
                     "dbsnp_source_url": DBSNP_URLS[source_assembly],
                     "dbsnp_target_url": DBSNP_URLS["GRCh38"],
                     "dbsnp_query_batch_size": batch_size,
+                    "dbsnp_workers": dbsnp_workers,
+                    "common_download_segments": download_segments,
+                    "dbsnp_source_query": source_query_provenance,
+                    "dbsnp_target_query": target_query_provenance,
                     "kent_tool_url": KENT_TOOL_URL,
                     "kent_version": KENT_VERSION,
                     "kent_tool_sha256": tool_sha256,
