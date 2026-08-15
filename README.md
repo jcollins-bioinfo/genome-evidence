@@ -36,13 +36,13 @@ These commands report aggregate status only. Use the public Python APIs `validat
 
 `genome-evidence workspace init` creates a provider-neutral, non-destructive tree. Durable PGx bundles belong under `references/pharmacogenomics/`, evictable source caches under `cache/{clinpgx,pharmvar,pharmcat}/`, and private M8 outputs under `runs/m8_pharmacogenomics/`. The canonical Colab location remains `/content/drive/MyDrive/genome-evidence-private`; local/offline roots are supported and preferred for privacy-sensitive work.
 
-Notebook 00B provisions the production normalization resources required by the source imported in notebook 00. It downloads the pinned ~1.8 GiB `dbSnp155Common.bb` for each required assembly with resumable ranges, queries a verified local `/content` copy, and sends only unresolved rsIDs through a bounded parallel query of the complete remote index. It never downloads the 65/68 GiB complete BigBeds and never transmits genotype calls. It verifies UCSC's GRCh38 FASTA checksum, builds the FAI and any conservative variant-specific GRCh37→GRCh38 map, and publishes provenance plus durable selectors last. Notebook 01 consumes that selection, computes ephemerally, and publishes re-hashed M1/M2 runs.
+Notebook 00B provisions the production normalization resources required by the source imported in notebook 00. It downloads the pinned ~1.8 GiB `dbSnp155Common.bb` for each required assembly with resumable ranges, queries a verified local `/content` copy, and sends only common-missing or validation-indeterminate rsIDs through a bounded parallel authoritative query of the complete remote index. It never downloads the 65/68 GiB complete BigBeds and never transmits genotype calls. It verifies UCSC's GRCh38 FASTA checksum, builds the FAI and any conservative variant-specific GRCh37→GRCh38 map, and publishes provenance plus durable selectors last. Notebook 01 consumes that selection, computes ephemerally, and publishes re-hashed M1/M2 runs.
 
 00B is restartable at operational boundaries. It writes privacy-safe progress both to the
 notebook cell and to
 `logs/notebooks/00b/<run-key>/events.jsonl`, while verified download and dbSNP-query
 checkpoints live under `cache/downloads/normalization/v1/<run-key>/`. Rerunning the
-provisioning cell verifies and reuses completed batches and downloaded bytes. Full-file
+provisioning cell verifies and reuses completed batches and downloaded bytes. A rejected common-query leaf is localized: validated sibling batches remain usable, while only that leaf and genuine common misses enter full-index fallback. Full-file
 transfers and byte-processing stages report byte rates and ETA; sparse remote BigBed
 queries report identifiers per second because the Kent utility does not expose truthful
 per-request byte telemetry. Last-written bundle and selector completion markers make
@@ -68,7 +68,7 @@ The [canonical notebook index](notebooks/README.md) lists all nine notebooks exa
 
 ## Development, versioning, and roadmap
 
-The package is pre-1.0 (`0.4.2` prepared): public APIs and schemas may evolve only under the documented compatibility/deprecation policy. This patch accelerates resumable 00B provisioning without changing the public selector schema or scientific normalization rules. It does not tag, publish, sign, or create a release. Follow the [roadmap](docs/roadmap.md), ADRs, documentation expectations in `AGENTS.md`, and MIT [license](LICENSE).
+The package is pre-1.0 (`0.4.3` prepared): public APIs and schemas may evolve only under the documented compatibility/deprecation policy. This patch accelerates resumable 00B provisioning without changing the public selector schema or scientific normalization rules. It does not tag, publish, sign, or create a release. Follow the [roadmap](docs/roadmap.md), ADRs, documentation expectations in `AGENTS.md`, and MIT [license](LICENSE).
 
 CI runs these locked gates:
 

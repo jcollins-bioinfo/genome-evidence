@@ -42,7 +42,7 @@ aggregate completion metadata, not the identifier lists.
 
 The GRCh38 archive is fetched from UCSC's fixed `hg38.fa.gz` endpoint and must match its published MD5 `1c9dcaddfa41027f17cd8f7a82c7293b` before decompression. The default checkpoint retains the roughly 938 MiB compressed archive in addition to approximately 3 GiB for the installed FASTA plus FAI. Plan for roughly 4 GiB of Drive usage plus smaller dbSNP checkpoints and logs; a preserved invalid archive can temporarily require another approximately 938 MiB. The checkpoint cache is evictable after a successful, checksum-valid selection, but removing it forfeits download and query resumption if provisioning must later be repeated.
 
-The pinned Kent v479 `bigBedNamedItems` utility first queries local copies of the pinned hg19/hg38 `dbSnp155Common.bb` files. Durable, identity-bound range segments live below the private normalization checkpoint; a verified assembled copy is materialized in ephemeral `/content` for fast queries. The complete 65/68 GiB files are **never downloaded**. Only common-missing rsIDs are sent to their pinned remote indexes. Common absence is not dbSNP absence: every unresolved identifier requires a successfully completed full-index fallback. Genotype tokens are never written to query lists or transmitted.
+The pinned Kent v479 `bigBedNamedItems` utility first queries local copies of the pinned hg19/hg38 `dbSnp155Common.bb` files. Durable, identity-bound range segments live below the private normalization checkpoint; a verified assembled copy is materialized in ephemeral `/content` for fast queries. The complete 65/68 GiB files are **never downloaded**. Only common-missing and common-indeterminate rsIDs are sent to their pinned remote indexes. Common-missing means a validated common query returned no row; common-indeterminate means a minimum query leaf could not be validated. Neither is authoritative dbSNP absence: both require a successfully completed full-index fallback. Genotype tokens are never written to query lists or transmitted.
 
 Plan for roughly 3.6 GiB of additional Drive checkpoint space for both common files on a GRCh37 run, plus approximately 1.8 GiB per required local common copy while active. Before transfer, 00B reports Drive and local free space. Segment files are the durable copy; local assembled/query files are ephemeral. A temporary assembled durable file can coexist during validation, so retain headroom. Drive rename atomicity is not used as a commit boundary: each segment and final resource has a last-written, checksum-bound completion manifest.
 
@@ -66,7 +66,7 @@ Rates have stage-specific meanings:
   performs opaque sparse range reads and does not expose reliable transfer-byte
   telemetry.
 
-The log deliberately excludes genotype calls, raw source rows, individual marker
+Rejected outputs use bounded categories such as `row-schema-invalid`, `coordinate-invalid`, `allele-count-incoherent`, `encoding-invalid`, `returned-identifier-outside-batch`, `output-missing`, or `output-io-invalid`. The log deliberately excludes genotype calls, raw source rows, individual marker
 identifiers, and unsanitized identifier-bearing subprocess diagnostics. It is written to
 the private Drive workspace, not uploaded to an external logging service.
 
@@ -74,8 +74,7 @@ the private Drive workspace, not uploaded to an external logging service.
 
 dbSNP identifiers are deterministically sorted, deduplicated, and queried in bounded
 batches. Each successful batch is parsed, checked against its requested identifier set,
-hashed, and completed with a manifest. Failed attempts use bounded backoff against the
-pinned UCSC endpoint and may be bisected into smaller batches.
+hashed, and completed with a manifest. Transient failures use bounded backoff against the pinned UCSC endpoint and may be bisected into smaller batches. Deterministic zero-exit validation rejection does not consume transient retries: common queries bisect immediately, preserve verified siblings, and route only a rejected minimum leaf to full fallback.
 Partial output from a failed process is never classified as a completed query. An
 identifier absent from a successfully completed query may remain unresolved; an
 uncompleted query is an operational failure, not biological missingness.
@@ -90,8 +89,7 @@ checksum-verified before reuse.
 
 Bounded network or workspace-I/O exhaustion becomes `ProvisioningIncomplete`; notebook
 00B prints `status: incomplete_resumable`, the durable log and checkpoint paths, and the
-instruction to rerun the cell. A rerun reconstructs the same run key, validates existing
-components, and continues at the first incomplete unit. Configuration conflicts,
+instruction to rerun the cell. A rerun reconstructs the same run key, validates existing components, and continues at the first incomplete unit. Keep the checkpoint tree: compatible common downloads, common batches, split children, and full-query checkpoints remain reusable across this orchestration correction. Configuration conflicts,
 unexpected data, checksum mismatches, unsafe paths, or incompatible completed resources
 remain errors. Tolerance never means accepting corrupt or scientifically incomplete
 resources. Before a bundle completion marker exists, torn workflow-owned output files

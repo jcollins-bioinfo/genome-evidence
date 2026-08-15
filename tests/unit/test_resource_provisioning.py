@@ -171,7 +171,7 @@ def test_kent_tool_probe_rejects_an_unrelated_executable(tmp_path: Path) -> None
         )
 
 
-def test_query_batch_retries_and_rejects_malformed_zero_exit_output(tmp_path: Path) -> None:
+def test_query_batch_does_not_retry_deterministically_rejected_output(tmp_path: Path) -> None:
     tool = tmp_path / "bigBedNamedItems"
     tool.write_bytes(b"synthetic")
     reporter = ProvisioningReporter(tmp_path / "events.jsonl", stream=io.StringIO())
@@ -181,7 +181,126 @@ def test_query_batch_retries_and_rejects_malformed_zero_exit_output(tmp_path: Pa
         nonlocal calls
         calls += 1
         output = Path(args[-1])
-        output.write_text("malformed\n" if calls == 1 else "chr1\t1\t2\trs1\tC\t1\tG,\t0\n")
+        output.write_text("malformed\n")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    with pytest.raises(resource_module._OutputValidationInterruption):  # noqa: SLF001
+        resource_module._query_batch(  # noqa: SLF001
+            tool,
+            "a" * 64,
+            (resource_module.DBSNP_URLS["GRCh37"],),
+            "GRCh37",
+            ("rs1",),
+            tmp_path / "checkpoint",
+            tmp_path / "work",
+            runner,
+            reporter,
+            attempts=4,
+            timeout_seconds=60,
+            sleep=lambda _seconds: None,
+        )
+
+    assert calls == 1
+    assert '"validation_category": "row-schema-invalid"' in reporter.log_path.read_text()
+    assert "rs1" not in reporter.log_path.read_text()
+
+
+def test_common_validation_failure_is_localized_to_leaf_and_missing_ids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(resource_module, "_MIN_SPLIT_BATCH_SIZE", 2)
+    tool = tmp_path / "bigBedNamedItems"
+    tool.write_bytes(b"synthetic")
+    reporter = ProvisioningReporter(tmp_path / "events.jsonl", stream=io.StringIO())
+    identifiers = tuple(f"rs{index}" for index in range(1, 7))
+    full_requests: list[tuple[str, ...]] = []
+
+    def download(_url: str, destination: Path) -> None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"synthetic common BigBed")
+
+    def runner(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        requested = tuple(Path(args[-2]).read_text().splitlines())
+        output = Path(args[-1])
+        if args[2] == resource_module.DBSNP_URLS["GRCh37"]:
+            full_requests.append(requested)
+            output.write_text("")
+        elif "dbSnp155Common.bb" in args[2]:
+            if "rs3" in requested:
+                output.write_text("malformed\n")
+            else:
+                returned = [value for value in requested if value in {"rs1", "rs5"}]
+                output.write_text(
+                    "".join(f"chr1\t1\t2\t{value}\tC\t1\tG,\t0\n" for value in returned)
+                )
+        else:
+            raise AssertionError("unexpected query endpoint")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    _, provenance = resource_module._query_common_first(  # noqa: SLF001
+        tool,
+        "a" * 64,
+        "GRCh37",
+        identifiers,
+        tmp_path / "checkpoints",
+        tmp_path / "work",
+        runner,
+        reporter,
+        download=download,
+        batch_size=4,
+        attempts=4,
+        timeout_seconds=60,
+        workers=1,
+        download_segments=1,
+        sleep=lambda _seconds: None,
+        label="grch37",
+    )
+
+    assert full_requests == [("rs2", "rs3", "rs4", "rs6")]
+    assert provenance["common_hit_count"] == 2
+    assert provenance["common_missing_count"] == 2
+    assert provenance["common_indeterminate_count"] == 2
+    assert provenance["full_fallback_requested_count"] == 4
+    assert provenance["completed_full_fallback_count"] == 4
+    assert "rs3" not in reporter.log_path.read_text()
+
+
+def test_common_fallback_plan_stays_proportional_at_real_world_scale() -> None:
+    identifiers = tuple(f"rs{index}" for index in range(950_000))
+    indeterminate = identifiers[320_000:320_156]
+    missing = identifiers[-1_000:]
+    indeterminate_set = set(indeterminate)
+    missing_set = set(missing)
+    unresolved = indeterminate_set | missing_set
+    covered = tuple(value for value in identifiers if value not in indeterminate_set)
+    returned = tuple(value for value in covered if value not in missing_set)
+    result = resource_module._CommonQueryResult(  # noqa: SLF001
+        output=None,
+        validated_outputs=(),
+        covered_identifiers=covered,
+        returned_identifiers=returned,
+        missing_identifiers=missing,
+        indeterminate_identifiers=indeterminate,
+    )
+
+    fallback = resource_module._common_fallback_identifiers(identifiers, result)  # noqa: SLF001
+
+    assert len(fallback) == 1_156
+    assert set(fallback) == unresolved
+    assert len(fallback) < len(identifiers) // 100
+
+
+def test_transient_nonzero_query_failure_retries_then_completes(tmp_path: Path) -> None:
+    tool = tmp_path / "bigBedNamedItems"
+    tool.write_bytes(b"synthetic")
+    calls = 0
+
+    def runner(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return subprocess.CompletedProcess(args, 255, stdout="", stderr="temporary failure")
+        Path(args[-1]).write_text("")
         return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
     output = resource_module._query_batch(  # noqa: SLF001
@@ -193,15 +312,14 @@ def test_query_batch_retries_and_rejects_malformed_zero_exit_output(tmp_path: Pa
         tmp_path / "checkpoint",
         tmp_path / "work",
         runner,
-        reporter,
+        ProvisioningReporter(tmp_path / "events.jsonl", stream=io.StringIO()),
         attempts=2,
         timeout_seconds=60,
         sleep=lambda _seconds: None,
     )
 
+    assert output is not None
     assert calls == 2
-    assert "rs1" in output.read_text()
-    assert "rs1" not in reporter.log_path.read_text()
 
 
 def test_query_batch_resumes_a_persisted_split_without_repeating_parent(

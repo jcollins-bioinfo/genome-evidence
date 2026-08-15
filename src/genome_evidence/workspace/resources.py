@@ -57,7 +57,7 @@ QUERY_SPLIT_SCHEMA = "genome-evidence-dbsnp-query-split/v1"
 BUNDLE_COMPLETION_SCHEMA = "genome-evidence-normalization-resource-bundle-completion/v1"
 SELECTION_PUBLICATION_SCHEMA = "genome-evidence-normalization-selection-publication/v1"
 SELECTION_COMPLETION_SCHEMA = "genome-evidence-normalization-selection-completion/v1"
-RESOURCE_ALGORITHM_VERSION = "genome-evidence-normalization-resource-builder/v3-common-parallel"
+RESOURCE_ALGORITHM_VERSION = "genome-evidence-normalization-resource-builder/v4-localized-common"
 _BUILD_PATTERN = re.compile(r"(?:build|assembly)[\s:=]+(GRCh\d+|hg\d+|37|38)\b", re.IGNORECASE)
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _RSID = re.compile(r"^rs\d+$")
@@ -122,6 +122,47 @@ class ProvisioningIncomplete(RuntimeError):
 
 class _OperationalInterruption(RuntimeError):
     """Internal marker for retry-exhausted operations that remain safely resumable."""
+
+
+class _OutputValidationInterruption(_OperationalInterruption):
+    """A deterministic, privacy-safe query-output rejection."""
+
+    def __init__(self, category: str, *, returned_record_count: int | None = None) -> None:
+        super().__init__(f"UCSC dbSNP query output was rejected ({category})")
+        self.category = category
+        self.returned_record_count = returned_record_count
+
+
+@dataclass(frozen=True)
+class _CommonQueryResult:
+    """Explicit coverage from independently validated common-index leaves."""
+
+    output: Path | None
+    validated_outputs: tuple[Path, ...]
+    covered_identifiers: tuple[str, ...]
+    returned_identifiers: tuple[str, ...]
+    missing_identifiers: tuple[str, ...]
+    indeterminate_identifiers: tuple[str, ...]
+
+    def validate(self, identifiers: Sequence[str]) -> None:
+        requested = set(identifiers)
+        covered = set(self.covered_identifiers)
+        returned = set(self.returned_identifiers)
+        missing = set(self.missing_identifiers)
+        indeterminate = set(self.indeterminate_identifiers)
+        if returned | missing != covered or returned & missing or covered & indeterminate:
+            raise RuntimeError("internal common-query coverage partition is inconsistent")
+        if covered | indeterminate != requested:
+            raise RuntimeError("internal common-query coverage does not partition the request")
+
+
+def _common_fallback_identifiers(
+    identifiers: Sequence[str], result: _CommonQueryResult
+) -> tuple[str, ...]:
+    """Plan authoritative fallback from explicit common coverage, preserving order."""
+    result.validate(identifiers)
+    unresolved = set(result.missing_identifiers) | set(result.indeterminate_identifiers)
+    return tuple(value for value in identifiers if value in unresolved)
 
 
 def _selection_control_paths(root: Path) -> tuple[Path, Path, Path]:
@@ -721,6 +762,35 @@ def _valid_query_checkpoint(
     return output
 
 
+def _validate_query_output(path: Path, identifiers: Sequence[str]) -> tuple[BigBedVariant, ...]:
+    """Validate query output while exposing only a bounded diagnostic category."""
+    if not path.is_file():
+        raise _OutputValidationInterruption("output-missing")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeError as error:
+        raise _OutputValidationInterruption("encoding-invalid") from error
+    except OSError as error:
+        raise _OutputValidationInterruption("output-io-invalid") from error
+    try:
+        rows = parse_bigbed_variants(text)
+    except ValueError as error:
+        message = str(error)
+        if "coordinate" in message or "position" in message:
+            category = "coordinate-invalid"
+        elif "allele" in message:
+            category = "allele-count-incoherent"
+        else:
+            category = "row-schema-invalid"
+        raise _OutputValidationInterruption(category) from error
+    requested = set(identifiers)
+    if any(row.marker_id not in requested for row in rows):
+        raise _OutputValidationInterruption(
+            "returned-identifier-outside-batch", returned_record_count=len(rows)
+        )
+    return rows
+
+
 def _publish_checkpoint_file(source: Path, destination: Path) -> None:
     """Copy verified local work into Drive; a completion sidecar is written separately."""
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -819,7 +889,9 @@ def _query_batch(
     sleep: Sleeper,
     split_depth: int = 0,
     worker_tmp: Path | None = None,
-) -> Path:
+    allow_validation_indeterminate: bool = False,
+    indeterminate: list[tuple[str, ...]] | None = None,
+) -> Path | None:
     payload = "\n".join(identifiers) + "\n"
     identifiers_sha256 = sha256(payload.encode("ascii")).hexdigest()
     completed = _valid_query_checkpoint(
@@ -873,6 +945,7 @@ def _query_batch(
                 split_depth=split_depth,
             )
     attempt_numbers = range(1, attempts + 1) if not split_planned else range(0)
+    deterministic_rejection: _OutputValidationInterruption | None = None
     for attempt in attempt_numbers:
         temporary.unlink(missing_ok=True)
         endpoint = urls[(attempt - 1) % len(urls)]
@@ -897,45 +970,24 @@ def _query_batch(
                 timeout_seconds=timeout_seconds,
                 worker_tmp=worker_tmp,
             )
-            if process.returncode == 0 and temporary.is_file():
-                validation_error_type: str | None = None
+            if process.returncode == 0:
                 try:
-                    rows = parse_bigbed_variants(temporary.read_text(encoding="utf-8"))
-                    requested = set(identifiers)
-                    if any(row.marker_id not in requested for row in rows):
-                        raise ValueError(
-                            "UCSC query returned an identifier outside the requested batch"
-                        )
-                except (OSError, UnicodeError, ValueError) as error:
-                    validation_error_type = type(error).__name__
-                    last_error = (
-                        "zero-exit query output failed validation "
-                        f"({validation_error_type}); partial output was rejected"
-                    )
-                    rows = None
-                if rows is None:
+                    rows = _validate_query_output(temporary, identifiers)
+                except _OutputValidationInterruption as error:
+                    deterministic_rejection = error
+                    last_error = str(error)
                     reporter.warning(
                         "dbsnp.batch.output-rejected",
-                        "UCSC returned an invalid batch output; it will be discarded and retried.",
+                        "UCSC returned an invalid batch output; it will be discarded and "
+                        "split or routed to authoritative fallback.",
                         identifier_count=len(identifiers),
                         attempt=attempt,
                         split_depth=split_depth,
-                        error_type=validation_error_type,
+                        validation_category=error.category,
+                        returned_record_count=error.returned_record_count,
                     )
                     temporary.unlink(missing_ok=True)
-                    if attempt < attempts:
-                        delay = min(2 ** (attempt - 1), 30) + random.uniform(0.0, 1.0)
-                        reporter.info(
-                            "dbsnp.batch.backoff",
-                            f"Retrying this query batch in {delay} seconds.",
-                            identifier_count=len(identifiers),
-                            attempt=attempt,
-                            next_attempt=attempt + 1,
-                            delay_seconds=delay,
-                            split_depth=split_depth,
-                        )
-                        sleep(delay)
-                    continue
+                    break
                 _publish_checkpoint_file(temporary, output)
                 manifest = {
                     "schema": QUERY_CHECKPOINT_SCHEMA,
@@ -991,7 +1043,7 @@ def _query_batch(
             delay = min(2 ** (attempt - 1), 30) + random.uniform(0.0, 1.0)
             reporter.info(
                 "dbsnp.batch.backoff",
-                f"Retrying this query batch in {delay} seconds.",
+                f"Retrying this query batch in {delay:.1f} seconds.",
                 identifier_count=len(identifiers),
                 attempt=attempt,
                 next_attempt=attempt + 1,
@@ -1039,6 +1091,8 @@ def _query_batch(
                 sleep=sleep,
                 split_depth=split_depth + 1,
                 worker_tmp=worker_tmp,
+                allow_validation_indeterminate=allow_validation_indeterminate,
+                indeterminate=indeterminate,
             ),
             _query_batch(
                 tool,
@@ -1055,11 +1109,16 @@ def _query_batch(
                 sleep=sleep,
                 split_depth=split_depth + 1,
                 worker_tmp=worker_tmp,
+                allow_validation_indeterminate=allow_validation_indeterminate,
+                indeterminate=indeterminate,
             ),
         )
+        available_children = tuple(child for child in children if child is not None)
+        if not available_children:
+            return None
         split_temporary = scratch / "split-records.bed.part"
         with split_temporary.open("wb") as destination:
-            for child in children:
+            for child in available_children:
                 with child.open("rb") as source:
                     shutil.copyfileobj(source, destination, length=1024 * 1024)
             destination.flush()
@@ -1068,6 +1127,8 @@ def _query_batch(
         requested = set(identifiers)
         if any(row.marker_id not in requested for row in rows):
             raise ValueError("adaptive UCSC query returned an unrequested identifier")
+        if len(available_children) != len(children):
+            return split_temporary
         _publish_checkpoint_file(split_temporary, output)
         _json(
             directory / "COMPLETED.json",
@@ -1086,6 +1147,22 @@ def _query_batch(
             },
         )
         return output
+    if deterministic_rejection is not None:
+        if allow_validation_indeterminate:
+            if indeterminate is None:
+                raise RuntimeError("common indeterminate accumulator is missing")
+            indeterminate.append(tuple(identifiers))
+            reporter.warning(
+                "dbsnp.common.leaf-indeterminate",
+                "A minimum common-query leaf was routed to authoritative full fallback.",
+                requested_identifier_count=len(identifiers),
+                split_depth=split_depth,
+                validation_category=deterministic_rejection.category,
+                returned_record_count=deterministic_rejection.returned_record_count,
+                routed_to_full_fallback=True,
+            )
+            return None
+        raise deterministic_rejection
     raise _OperationalInterruption(
         f"UCSC dbSNP query failed after retries; rerun to resume from completed batches. "
         f"Last diagnostic: {last_error}"
@@ -1201,6 +1278,8 @@ def _query_bigbed_in_batches(
             sleep=sleep,
             worker_tmp=local.work,
         )
+        if result is None:
+            raise RuntimeError("strict full-index query produced no validated output")
         return index, result, len(batch)
 
     pending = [spec for spec in batch_specs if spec[3] is None]
@@ -1288,6 +1367,73 @@ def _merge_query_outputs(paths: Sequence[Path], destination: Path) -> Path:
     return destination
 
 
+def _query_common_batches(
+    tool: Path,
+    tool_sha256: str,
+    local_common: Path,
+    assembly: str,
+    identifiers: Sequence[str],
+    checkpoint_root: Path,
+    work: Path,
+    runner: Runner,
+    reporter: ProvisioningReporter,
+    *,
+    batch_size: int,
+    attempts: int,
+    timeout_seconds: int,
+    sleep: Sleeper,
+    label: str,
+) -> _CommonQueryResult:
+    """Query common batches independently and retain valid siblings of rejected leaves."""
+    outputs: list[Path] = []
+    indeterminate_leaves: list[tuple[str, ...]] = []
+    for index, start in enumerate(range(0, len(identifiers), batch_size)):
+        batch = identifiers[start : start + batch_size]
+        payload = "\n".join(batch) + "\n"
+        digest = sha256(payload.encode("ascii")).hexdigest()
+        directory = checkpoint_root / label / "batches" / f"{index:05d}-{digest[:12]}"
+        output = _query_batch(
+            tool,
+            tool_sha256,
+            (str(local_common),),
+            assembly,
+            batch,
+            directory,
+            work,
+            runner,
+            reporter,
+            attempts=attempts,
+            timeout_seconds=timeout_seconds,
+            sleep=sleep,
+            allow_validation_indeterminate=True,
+            indeterminate=indeterminate_leaves,
+        )
+        if output is not None:
+            outputs.append(output)
+    indeterminate_set = {value for leaf in indeterminate_leaves for value in leaf}
+    covered = tuple(value for value in identifiers if value not in indeterminate_set)
+    returned_set: set[str] = set()
+    for output in outputs:
+        returned_set.update(row.marker_id for row in _validate_query_output(output, covered))
+    returned = tuple(value for value in identifiers if value in returned_set)
+    missing = tuple(value for value in covered if value not in returned_set)
+    indeterminate_identifiers = tuple(value for value in identifiers if value in indeterminate_set)
+    combined = None
+    if outputs:
+        combined = checkpoint_root / label / "validated-common.bed"
+        _merge_query_outputs(outputs, combined)
+    result = _CommonQueryResult(
+        output=combined,
+        validated_outputs=tuple(outputs),
+        covered_identifiers=covered,
+        returned_identifiers=returned,
+        missing_identifiers=missing,
+        indeterminate_identifiers=indeterminate_identifiers,
+    )
+    result.validate(identifiers)
+    return result
+
+
 def _query_common_first(
     tool: Path,
     tool_sha256: str,
@@ -1310,7 +1456,7 @@ def _query_common_first(
     """Use a local common BigBed as a non-authoritative accelerator, then full fallback."""
     common_cache = checkpoint_root / "common" / assembly.lower() / "dbSnp155Common.bb"
     common_manifest: dict[str, Any] | None = None
-    common_output: Path | None = None
+    common_result: _CommonQueryResult | None = None
     try:
         if download is None:
             common_cache, common_manifest = segmented_download(
@@ -1337,10 +1483,20 @@ def _query_common_first(
         shutil.copyfile(common_cache, local_common)
         if _hash(local_common) != common_manifest["sha256"]:
             raise OSError("local common dbSNP copy failed checksum verification")
-        common_output = _query_bigbed_in_batches(
+    except (OSError, RuntimeError, ValueError) as error:
+        reporter.warning(
+            f"dbsnp.{label}.common.unavailable",
+            "The common resource could not be validated; every identifier requires "
+            "authoritative full fallback.",
+            error_type=type(error).__name__,
+            full_fallback_requested_count=len(identifiers),
+        )
+        common_manifest = {"status": "unavailable", "canonical_url": DBSNP_COMMON_URLS[assembly]}
+    else:
+        common_result = _query_common_batches(
             tool,
             tool_sha256,
-            (str(local_common),),
+            local_common,
             assembly,
             identifiers,
             checkpoint_root / "common-query",
@@ -1352,29 +1508,20 @@ def _query_common_first(
             timeout_seconds=timeout_seconds,
             sleep=sleep,
             label=f"{label}-common",
-            workers=1,
         )
-        common_rows = parse_bigbed_variants(common_output.read_text(encoding="utf-8"))
-        returned = {row.marker_id for row in common_rows}
-        unresolved = tuple(identifier for identifier in identifiers if identifier not in returned)
+        unresolved = _common_fallback_identifiers(identifiers, common_result)
         reporter.success(
             f"dbsnp.{label}.common.complete",
-            f"Local common dbSNP returned {len(returned):,} identifiers; "
+            f"Local common dbSNP returned {len(common_result.returned_identifiers):,} "
+            "identifiers; "
             f"{len(unresolved):,} require full fallback.",
-            common_hit_count=len(returned),
-            full_fallback_count=len(unresolved),
+            common_hit_count=len(common_result.returned_identifiers),
+            common_missing_count=len(common_result.missing_identifiers),
+            common_indeterminate_count=len(common_result.indeterminate_identifiers),
+            full_fallback_requested_count=len(unresolved),
         )
-    except Exception as error:
-        reporter.warning(
-            f"dbsnp.{label}.common.unavailable",
-            "Common dbSNP could not be validated; safely querying every identifier "
-            "against the full pinned index.",
-            error_type=type(error).__name__,
-            full_fallback_count=len(identifiers),
-        )
-        common_output = None
+    if common_result is None:
         unresolved = tuple(identifiers)
-        common_manifest = {"status": "unavailable", "canonical_url": DBSNP_COMMON_URLS[assembly]}
     # v1 placed full-query batches directly below dbsnp/<assembly>/<query-key>. Rebuild
     # that deterministic plan and accept only independently valid completion manifests.
     legacy_outputs: list[Path] = []
@@ -1402,7 +1549,9 @@ def _query_common_first(
         if valid is not None:
             legacy_outputs.append(valid)
             legacy_covered.update(batch)
-    if legacy_covered:
+    full_fallback_requested_count = len(unresolved)
+    eligible_legacy_covered = legacy_covered.intersection(unresolved)
+    if eligible_legacy_covered:
         unresolved = tuple(
             identifier for identifier in unresolved if identifier not in legacy_covered
         )
@@ -1410,7 +1559,7 @@ def _query_common_first(
             f"dbsnp.{label}.legacy.resume",
             f"Reused {len(legacy_outputs):,} verified legacy full-query batches.",
             resumed_legacy_batches=len(legacy_outputs),
-            resumed_legacy_identifiers=len(legacy_covered),
+            resumed_legacy_identifiers=len(eligible_legacy_covered),
         )
     fallback = None
     if unresolved:
@@ -1434,9 +1583,10 @@ def _query_common_first(
         reporter.info(
             f"dbsnp.{label}.resume",
             "Verified fallback checkpoints were incorporated where available.",
-            full_fallback_count=len(unresolved),
+            completed_full_fallback_count=len(unresolved),
         )
     merged = checkpoint_root / "merged" / f"{label}.bed"
+    common_output = common_result.output if common_result else None
     paths = [path for path in (common_output, *legacy_outputs, fallback) if path is not None]
     _merge_query_outputs(paths, merged)
     return merged, {
@@ -1447,10 +1597,24 @@ def _query_common_first(
             else None
         ),
         "full_url": DBSNP_URLS[assembly],
-        "common_hit_count": len(identifiers) - len(unresolved),
-        "full_fallback_count": len(unresolved),
+        "common_hit_count": (
+            len(common_result.returned_identifiers) if common_result is not None else 0
+        ),
+        "common_missing_count": (
+            len(common_result.missing_identifiers) if common_result is not None else 0
+        ),
+        "common_indeterminate_count": (
+            len(common_result.indeterminate_identifiers)
+            if common_result is not None
+            else len(identifiers)
+        ),
+        "legacy_full_covered_count": len(eligible_legacy_covered),
+        "full_fallback_requested_count": full_fallback_requested_count,
+        "completed_full_fallback_count": len(unresolved),
         "legacy_batch_count": len(legacy_outputs),
         "workers": workers,
+        "batch_size": batch_size,
+        "algorithm_version": RESOURCE_ALGORITHM_VERSION,
     }
 
 
