@@ -16,7 +16,7 @@ The locked local environment and `synthetic_ci` nbmake CI are canonical. `person
 
 00B uses **common-first + bounded-parallel fallback**. It downloads pinned common
 BigBeds with 8 resumable segments by default, queries verified local copies, then sends
-only unresolved identifiers to the complete remote indexes with 6 isolated-cache Kent
+only common-missing and common-indeterminate identifiers to the authoritative complete remote indexes with 6 isolated-cache Kent
 workers. Configure `GENOME_EVIDENCE_COMMON_DOWNLOAD_SEGMENTS` and
 `GENOME_EVIDENCE_DBSNP_WORKERS` from 1–12; use `1` for serial behavior. The complete
 65/68 GiB BigBeds are never downloaded. Restart the runtime and rerun the same cell after
@@ -32,7 +32,7 @@ identifiers.
 
 Durable state is stored under
 `cache/downloads/normalization/v1/<run-key>/`. A rerun validates each completion marker
-and checksum before reusing it. Successful dbSNP batches are not repeated, and an
+and checksum before reusing it. Successful dbSNP batches and adaptive-split children are not repeated. A deterministic common-output rejection is categorized without identifiers, localized to its minimum leaf, and routed to full fallback without discarding validated siblings. An
 interrupted HTTP transfer continues from its retained `.part` bytes when the server
 honors the requested byte range. A partial gzip decompression restarts that transform
 from the retained, checksum-verified archive because gzip decoder state cannot safely be

@@ -37,7 +37,7 @@ def test_provisioned_resources_drive_personal_m1_m2(
         elif url == resource_module.FASTA_URL:
             destination.write_bytes(fasta_payload)
         else:
-            raise AssertionError(f"unexpected full download: {url}")
+            raise OSError(f"synthetic unavailable resource: {url}")
 
     def fake_runner(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         if len(args) == 1:
@@ -118,7 +118,7 @@ def test_provisioning_resumes_after_target_dbsnp_interruption(
         elif url == resource_module.FASTA_URL:
             destination.write_bytes(fasta_payload)
         else:
-            raise AssertionError(f"unexpected full download: {url}")
+            raise OSError(f"synthetic unavailable resource: {url}")
 
     query_counts = {"source": 0, "target": 0}
 

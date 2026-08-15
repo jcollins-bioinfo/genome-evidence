@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.4.2 - Unreleased
+## 0.4.3 - Unreleased
+
+- Localize deterministic common-dbSNP validation failures to their minimum query leaves, preserve every independently validated common checkpoint, and authoritatively fall back only for common-missing or common-indeterminate identifiers.
+- Add privacy-safe validation categories and explicit, internally consistent common, legacy-full, and full-fallback provenance counts without changing the public selection schema.
+- Retain compatible v1 query checkpoints and strict, resumable full-index failure semantics.
+
+## 0.4.2
 
 - Replace serial complete-dbSNP extraction with local common-dbSNP-first querying and a
   globally bounded, isolated-cache full-index fallback.
