@@ -241,6 +241,28 @@ def segmented_download(
     if not 1 <= concurrency <= 12:
         raise ValueError("segment concurrency must be between 1 and 12")
     identity = identity or remote_identity(url, timeout_seconds=timeout_seconds)
+    completion_path = destination.with_name(destination.name + ".COMPLETED.json")
+    if destination.is_file() and completion_path.is_file():
+        try:
+            installed = json.loads(completion_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            installed = {}
+        if (
+            installed.get("schema") == "genome-evidence-segmented-download/v1"
+            and installed.get("remote_identity") == asdict(identity)
+            and installed.get("byte_size") == identity.total_bytes
+            and installed.get("sha256") == _hash(destination)
+        ):
+            reporter.success(
+                "common.download.reuse",
+                "Reused a completed destination after explicit manifest verification; "
+                "no segment assembly or download was performed.",
+                reused_complete_segments=installed.get("segment_count", 0),
+                session_downloaded_bytes=0,
+                final_file_verification=True,
+                byte_size=identity.total_bytes,
+            )
+            return destination, installed
     directory = destination.with_name(destination.name + ".segments")
     directory.mkdir(parents=True, exist_ok=True)
     ranges = [
@@ -249,6 +271,21 @@ def segmented_download(
     ]
     cancel = threading.Event()
     started = time.monotonic()
+    retained_bytes = 0
+    reused_segments = 0
+    for start, end in ranges:
+        key = f"{start:020d}-{end:020d}"
+        partial = directory / f"{key}.part"
+        state_path = directory / f"{key}.json"
+        completed_path = directory / f"{key}.COMPLETED.json"
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            state = {}
+        if state.get("identity_key") == identity.key and partial.is_file():
+            retained_bytes += min(partial.stat().st_size, end - start + 1)
+            if completed_path.is_file() and partial.stat().st_size == end - start + 1:
+                reused_segments += 1
     try:
         with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="common-range") as pool:
             futures = {
@@ -280,10 +317,14 @@ def segmented_download(
                     identity.total_bytes,
                     unit="bytes",
                     started_at=started,
+                    initial_completed=retained_bytes,
                     force=True,
                     completed_segments=sum(item is not None for item in outputs),
                     total_segments=len(outputs),
                     configured_workers=concurrency,
+                    session_downloaded_bytes=max(completed - retained_bytes, 0),
+                    resumed_partial_bytes=retained_bytes,
+                    reused_complete_segments=reused_segments,
                 )
     except RangeUnsupported:
         cancel.set()
@@ -306,6 +347,11 @@ def segmented_download(
                 "single-stream fallback length differs from probed remote identity"
             ) from None
     else:
+        reporter.info(
+            "common.download.assemble",
+            "ASSEMBLE verified segments into the destination file.",
+            segment_count=len(ranges),
+        )
         temporary = destination.with_name(destination.name + ".assembling")
         with temporary.open("wb") as target:
             for output in outputs:
@@ -319,6 +365,7 @@ def segmented_download(
             raise OSError("assembled common file has the wrong byte length")
         os.replace(temporary, destination)
     if validate:
+        reporter.info("common.download.verify", "VERIFY the assembled destination file.")
         validate(destination)
     manifest = {
         "schema": "genome-evidence-segmented-download/v1",
@@ -328,7 +375,7 @@ def segmented_download(
         "segment_count": len(ranges),
         "segment_concurrency": concurrency,
     }
-    _write_json(destination.with_name(destination.name + ".COMPLETED.json"), manifest)
+    _write_json(completion_path, manifest)
     reporter.success(
         "common.download.complete",
         "Completed and verified a common dbSNP file.",

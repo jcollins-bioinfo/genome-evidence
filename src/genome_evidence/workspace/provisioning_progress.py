@@ -15,11 +15,68 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
-from typing import IO, Any, Self
+from typing import IO, Any, Literal, Self
 
 MiB = 1024 * 1024
 Clock = Callable[[], float]
 Sleeper = Callable[[float], None]
+ProgressStyle = Literal["auto", "unicode", "ascii", "plain"]
+
+WORKFLOW_STAGES_V1: tuple[tuple[str, str, float], ...] = (
+    ("preflight", "preflight/source validation", 0.03),
+    ("kent", "Kent tool validation", 0.04),
+    ("grch37_cache", "GRCh37 common cache acquisition/verification", 0.13),
+    ("grch37_common", "GRCh37 common lookup", 0.10),
+    ("grch37_fallback", "GRCh37 authoritative fallback", 0.12),
+    ("grch38_cache", "GRCh38 common cache acquisition/verification", 0.13),
+    ("grch38_common", "GRCh38 common lookup", 0.10),
+    ("grch38_fallback", "GRCh38 authoritative fallback", 0.12),
+    ("fasta_acquire", "FASTA acquisition and verification", 0.08),
+    ("fasta_build", "FASTA decompression and FAI construction", 0.06),
+    ("resources", "marker/liftover resource construction", 0.05),
+    ("publish", "artifact verification and selector-last publication", 0.04),
+)
+
+
+def progress_bar(fraction: float, *, width: int = 30, style: ProgressStyle = "unicode") -> str:
+    """Render a stable-width, dependency-free progress bar."""
+    fraction = min(max(fraction, 0.0), 1.0)
+    if style == "auto":
+        style = "unicode" if (sys.stdout.encoding or "").lower().startswith("utf") else "ascii"
+    if style == "plain":
+        return f"{fraction * 100:.1f}%"
+    if style == "ascii":
+        filled = min(int(fraction * width), width)
+        return "#" * filled + "-" * (width - filled)
+    eighths = int(fraction * width * 8)
+    full, remainder = divmod(eighths, 8)
+    fractions = "▏▎▍▌▋▊▉"
+    return (
+        "█" * full
+        + (fractions[remainder - 1] if remainder else "")
+        + "░" * (width - full - bool(remainder))
+    )
+
+
+class WorkflowProgress:
+    """Versioned, monotonic workflow-completion model (not byte or wall-clock progress)."""
+
+    schema = "genome-evidence-00b-workflow-progress/v1"
+
+    def __init__(self) -> None:
+        self._fractions = {key: 0.0 for key, _, _ in WORKFLOW_STAGES_V1}
+        self._floor = 0.0
+
+    def update(self, stage: str, fraction: float) -> float:
+        if stage not in self._fractions:
+            raise KeyError(stage)
+        self._fractions[stage] = max(self._fractions[stage], min(max(fraction, 0.0), 1.0))
+        value = sum(weight * self._fractions[key] for key, _, weight in WORKFLOW_STAGES_V1)
+        self._floor = max(self._floor, value)
+        return self._floor
+
+    def complete(self, stage: str) -> float:
+        return self.update(stage, 1.0)
 
 
 def _format_amount(value: float, unit: str) -> str:
@@ -53,12 +110,23 @@ class ProvisioningReporter:
         stream: IO[str] | None = None,
         clock: Clock = time.monotonic,
         progress_interval_seconds: float = 5.0,
+        style: ProgressStyle | None = None,
+        dashboard_interval_seconds: float = 0.75,
+        display_sink: Callable[[str], None] | None = None,
     ) -> None:
         self.log_path = log_path
         self.session_id = uuid.uuid4().hex[:12]
         self.stream = sys.stdout if stream is None else stream
         self._clock = clock
         self._interval = progress_interval_seconds
+        requested = style or os.environ.get("GENOME_EVIDENCE_PROGRESS_STYLE", "auto")
+        if requested not in {"auto", "unicode", "ascii", "plain"}:
+            requested = "auto"
+        self.style: ProgressStyle = requested  # type: ignore[assignment]
+        self.workflow = WorkflowProgress()
+        self._dashboard_interval = dashboard_interval_seconds
+        self._last_dashboard = float("-inf")
+        self._display_sink = display_sink or self._jupyter_sink()
         self._last_progress: dict[str, float] = {}
         self._lock = threading.RLock()
         self._log_available = True
@@ -71,6 +139,72 @@ class ProvisioningReporter:
         else:
             with suppress(OSError):
                 os.chmod(log_path, 0o600)
+
+    @staticmethod
+    def _jupyter_sink() -> Callable[[str], None] | None:
+        """Use IPython when already present without making it a runtime dependency."""
+        if "IPython" not in sys.modules:
+            return None
+        try:
+            display = sys.modules["IPython.display"].display
+        except (AttributeError, KeyError):
+            return None
+        handle: Any = None
+
+        def sink(value: str) -> None:
+            nonlocal handle
+            if handle is None:
+                handle = display(value, display_id=True)
+            else:
+                handle.update(value)
+
+        return sink
+
+    def workflow_progress(
+        self,
+        stage: str,
+        fraction: float,
+        *,
+        status: str = "running",
+        force: bool = False,
+        **fields: Any,
+    ) -> None:
+        """Update and publish normalized workflow completion without allowing regression."""
+        with self._lock:
+            overall = self.workflow.update(stage, fraction)
+            index = next(i for i, item in enumerate(WORKFLOW_STAGES_V1) if item[0] == stage)
+            label = WORKFLOW_STAGES_V1[index][1]
+            now = self._clock()
+            bar = progress_bar(overall, style=self.style)
+            stage_bar = progress_bar(fraction, style=self.style)
+            indicator = "◉" if self.style in {"auto", "unicode"} else "OVERALL"
+            dashboard = (
+                f"{indicator} OVERALL [{bar}] {overall * 100:5.1f}% workflow completion\n"
+                f"  Stage {index + 1}/{len(WORKFLOW_STAGES_V1)} · {label} · {status}\n"
+                f"  [{stage_bar}] {fraction * 100:5.1f}% · Log {self.log_path}"
+            )
+            if self._display_sink is not None and (
+                force or now - self._last_dashboard >= self._dashboard_interval
+            ):
+                try:
+                    self._display_sink(dashboard)
+                except Exception:  # display failures must never terminate provisioning
+                    self._display_sink = None
+                self._last_dashboard = now
+            self._event_locked(
+                "PROG",
+                "workflow.progress",
+                dashboard.replace("\n", " | "),
+                workflow_schema=self.workflow.schema,
+                overall_fraction=overall,
+                overall_percent=overall * 100,
+                stage=stage,
+                stage_number=index + 1,
+                stage_count=len(WORKFLOW_STAGES_V1),
+                stage_fraction=self.workflow._fractions[stage],
+                stage_status=status,
+                **fields,
+            )
 
     def event(self, level: str, event: str, message: str, **fields: Any) -> None:
         with self._lock:

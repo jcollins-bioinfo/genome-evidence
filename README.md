@@ -38,8 +38,13 @@ These commands report aggregate status only. Use the public Python APIs `validat
 
 Notebook 00B provisions the production normalization resources required by the source imported in notebook 00. It downloads the pinned ~1.8 GiB `dbSnp155Common.bb` for each required assembly with resumable ranges, queries a verified local `/content` copy, and sends only common-missing or validation-indeterminate rsIDs through a bounded parallel authoritative query of the complete remote index. It never downloads the 65/68 GiB complete BigBeds and never transmits genotype calls. It verifies UCSC's GRCh38 FASTA checksum, builds the FAI and any conservative variant-specific GRCh37→GRCh38 map, and publishes provenance plus durable selectors last. Notebook 01 consumes that selection, computes ephemerally, and publishes re-hashed M1/M2 runs.
 
-00B is restartable at operational boundaries. It writes privacy-safe progress both to the
-notebook cell and to
+00B is restartable at operational boundaries. It writes privacy-safe progress both to an
+in-place notebook dashboard and to append-only stdout/JSONL checkpoints. The dashboard
+labels its versioned, weighted 12-stage value as **workflow completion** (not bytes or an
+exact wall-clock fraction), while common-query bars count disposition-complete top-level
+batches without inflating totals for adaptive split children. Set
+`GENOME_EVIDENCE_PROGRESS_STYLE=auto|unicode|ascii|plain` to select the dependency-light
+renderer. Events are written to
 `logs/notebooks/00b/<run-key>/events.jsonl`, while verified download and dbSNP-query
 checkpoints live under `cache/downloads/normalization/v1/<run-key>/`. Rerunning the
 provisioning cell verifies and reuses completed batches and downloaded bytes. A rejected common-query leaf is localized: validated sibling batches remain usable, while only that leaf and genuine common misses enter full-index fallback. Full-file

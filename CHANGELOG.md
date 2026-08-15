@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.4.3 - Unreleased
+## 0.4.4 - Unreleased
+
+- Restore top-level common-query aggregate progress and add a monotonic, versioned
+  12-stage workflow-completion dashboard with Unicode, ASCII, and plain renderers.
+- Separate current-session transfer bytes from retained/reused segments, explicitly
+  label assembly and verification, and reuse checksum-valid completed destinations.
+
+## 0.4.3
 
 - Localize deterministic common-dbSNP validation failures to their minimum query leaves, preserve every independently validated common checkpoint, and authoritatively fall back only for common-missing or common-indeterminate identifiers.
 - Add privacy-safe validation categories and explicit, internally consistent common, legacy-full, and full-fallback provenance counts without changing the public selection schema.

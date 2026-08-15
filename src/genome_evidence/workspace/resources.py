@@ -1387,6 +1387,21 @@ def _query_common_batches(
     """Query common batches independently and retain valid siblings of rejected leaves."""
     outputs: list[Path] = []
     indeterminate_leaves: list[tuple[str, ...]] = []
+    started_at = time.monotonic()
+    total_batches = (len(identifiers) + batch_size - 1) // batch_size
+    progress_event = f"dbsnp.{label}.progress"
+    reporter.progress(
+        progress_event,
+        label.replace("-", " "),
+        0,
+        len(identifiers),
+        unit="IDs",
+        started_at=started_at,
+        force=True,
+        completed_batches=0,
+        total_batches=total_batches,
+        indeterminate_leaf_count=0,
+    )
     for index, start in enumerate(range(0, len(identifiers), batch_size)):
         batch = identifiers[start : start + batch_size]
         payload = "\n".join(batch) + "\n"
@@ -1410,6 +1425,21 @@ def _query_common_batches(
         )
         if output is not None:
             outputs.append(output)
+        # A top-level batch is disposition-complete whether it returned no rows, resumed,
+        # split into children, or ended in validation-indeterminate leaves. Child work must
+        # never change this top-level denominator.
+        reporter.progress(
+            progress_event,
+            label.replace("-", " "),
+            start + len(batch),
+            len(identifiers),
+            unit="IDs",
+            started_at=started_at,
+            force=True,
+            completed_batches=index + 1,
+            total_batches=total_batches,
+            indeterminate_leaf_count=len(indeterminate_leaves),
+        )
     indeterminate_set = {value for leaf in indeterminate_leaves for value in leaf}
     covered = tuple(value for value in identifiers if value not in indeterminate_set)
     returned_set: set[str] = set()
@@ -1454,6 +1484,8 @@ def _query_common_first(
     label: str,
 ) -> tuple[Path, dict[str, Any]]:
     """Use a local common BigBed as a non-authoritative accelerator, then full fallback."""
+    prefix = assembly.lower()
+    reporter.workflow_progress(f"{prefix}_cache", 0.0, force=True)
     common_cache = checkpoint_root / "common" / assembly.lower() / "dbSnp155Common.bb"
     common_manifest: dict[str, Any] | None = None
     common_result: _CommonQueryResult | None = None
@@ -1493,6 +1525,8 @@ def _query_common_first(
         )
         common_manifest = {"status": "unavailable", "canonical_url": DBSNP_COMMON_URLS[assembly]}
     else:
+        reporter.workflow_progress(f"{prefix}_cache", 1.0, status="complete", force=True)
+        reporter.workflow_progress(f"{prefix}_common", 0.0, force=True)
         common_result = _query_common_batches(
             tool,
             tool_sha256,
@@ -1520,8 +1554,12 @@ def _query_common_first(
             common_indeterminate_count=len(common_result.indeterminate_identifiers),
             full_fallback_requested_count=len(unresolved),
         )
+        reporter.workflow_progress(f"{prefix}_common", 1.0, status="complete", force=True)
     if common_result is None:
         unresolved = tuple(identifiers)
+        reporter.workflow_progress(f"{prefix}_cache", 1.0, status="complete", force=True)
+        reporter.workflow_progress(f"{prefix}_common", 1.0, status="skipped", force=True)
+    reporter.workflow_progress(f"{prefix}_fallback", 0.0, force=True)
     # v1 placed full-query batches directly below dbsnp/<assembly>/<query-key>. Rebuild
     # that deterministic plan and accept only independently valid completion manifests.
     legacy_outputs: list[Path] = []
@@ -1589,6 +1627,7 @@ def _query_common_first(
     common_output = common_result.output if common_result else None
     paths = [path for path in (common_output, *legacy_outputs, fallback) if path is not None]
     _merge_query_outputs(paths, merged)
+    reporter.workflow_progress(f"{prefix}_fallback", 1.0, status="complete", force=True)
     return merged, {
         "common": common_manifest,
         "common_output": (
@@ -2297,6 +2336,7 @@ def provision_personal_normalization_resources(
                 source_marker_count=len(markers),
                 rsid_count=len(identifiers),
             )
+            reporter.workflow_progress("preflight", 1.0, status="complete", force=True)
             selection_path, publishing_path, _ = _selection_control_paths(root)
             if publishing_path.is_symlink():
                 raise ValueError("normalization selector publication marker is unsafe")
@@ -2349,6 +2389,20 @@ def provision_personal_normalization_resources(
                     defined_marker_count=defined,
                     mapped_marker_count=mapped,
                 )
+                for completed_stage in (
+                    "kent",
+                    "grch37_cache",
+                    "grch37_common",
+                    "grch37_fallback",
+                    "grch38_cache",
+                    "grch38_common",
+                    "grch38_fallback",
+                    "fasta_acquire",
+                    "fasta_build",
+                    "resources",
+                    "publish",
+                ):
+                    reporter.workflow_progress(completed_stage, 1.0, status="resumed", force=True)
                 return ProvisioningResult(
                     existing,
                     selection_path,
@@ -2362,6 +2416,7 @@ def provision_personal_normalization_resources(
                 prefix="genome-evidence-resources-", dir=temporary_parent
             ) as tmp:
                 work = Path(tmp)
+                reporter.workflow_progress("kent", 0.0, force=True)
                 tool, tool_sha256 = _prepare_kent_tool(
                     root,
                     work,
@@ -2370,6 +2425,14 @@ def provision_personal_normalization_resources(
                     reporter,
                     sleep=sleep,
                 )
+                reporter.workflow_progress("kent", 1.0, status="complete", force=True)
+                if source_assembly == "GRCh38":
+                    for skipped_stage in (
+                        "grch37_cache",
+                        "grch37_common",
+                        "grch37_fallback",
+                    ):
+                        reporter.workflow_progress(skipped_stage, 1.0, status="skipped", force=True)
                 source_bed, source_query_provenance = _query_common_first(
                     tool,
                     tool_sha256,
@@ -2429,6 +2492,8 @@ def provision_personal_normalization_resources(
                     f"{stats['defined_marker_count']:,} source markers.",
                     **stats,
                 )
+                reporter.workflow_progress("resources", 1.0, status="complete", force=True)
+                reporter.workflow_progress("fasta_acquire", 0.0, force=True)
                 fasta, fasta_index, fasta_manifest = _prepare_fasta(
                     root,
                     checkpoint_root,
@@ -2436,6 +2501,9 @@ def provision_personal_normalization_resources(
                     reporter,
                     sleep=sleep,
                 )
+                reporter.workflow_progress("fasta_acquire", 1.0, status="complete", force=True)
+                reporter.workflow_progress("fasta_build", 1.0, status="complete", force=True)
+                reporter.workflow_progress("publish", 0.0, force=True)
                 source_extract_sha256 = _hash(source_bed)
                 target_extract_sha256 = _hash(target_bed)
                 bundle_id = sha256(
@@ -2651,6 +2719,7 @@ def provision_personal_normalization_resources(
                 unresolved_marker_count=max(len(markers) - defined, 0),
                 selection_path=_workspace_relative(root, selection_path),
             )
+            reporter.workflow_progress("publish", 1.0, status="complete", force=True)
             return ProvisioningResult(
                 selection,
                 selection_path,

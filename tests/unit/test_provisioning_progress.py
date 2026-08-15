@@ -13,6 +13,8 @@ import pytest
 import genome_evidence.workspace.provisioning_progress as progress_module
 from genome_evidence.workspace.provisioning_progress import (
     ProvisioningReporter,
+    WorkflowProgress,
+    progress_bar,
     resumable_download,
 )
 
@@ -58,6 +60,44 @@ def _events(path: Path) -> list[dict[str, Any]]:
 
 def _clock(values: Iterator[float]) -> Callable[[], float]:
     return lambda: next(values)
+
+
+def test_progress_bars_have_stable_width_and_workflow_is_monotonic() -> None:
+    for style in ("unicode", "ascii"):
+        assert len(progress_bar(0.0, width=17, style=style)) == 17
+        assert len(progress_bar(0.537, width=17, style=style)) == 17
+        assert len(progress_bar(1.0, width=17, style=style)) == 17
+    workflow = WorkflowProgress()
+    values = [
+        workflow.update("preflight", 0.5),
+        workflow.complete("grch37_fallback"),
+        workflow.update("preflight", 0.1),
+        workflow.complete("preflight"),
+    ]
+    assert values == sorted(values)
+
+
+def test_dashboard_failure_is_isolated_and_jsonl_matches_numeric_state(tmp_path: Path) -> None:
+    calls = 0
+
+    def broken_display(_value: str) -> None:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("synthetic display failure")
+
+    reporter = ProvisioningReporter(
+        tmp_path / "events.jsonl",
+        stream=io.StringIO(),
+        display_sink=broken_display,
+        progress_interval_seconds=0,
+    )
+    reporter.workflow_progress("preflight", 0.5, force=True, resumed_batches=2)
+    reporter.workflow_progress("preflight", 1.0, force=True, resumed_batches=2)
+    records = [row for row in _events(reporter.log_path) if row["event"] == "workflow.progress"]
+    assert calls == 1
+    assert records[-1]["stage_fraction"] == 1.0
+    assert records[-1]["overall_fraction"] == pytest.approx(0.03)
+    assert records[-1]["resumed_batches"] == 2
 
 
 def test_reporter_mirrors_aggregate_progress_to_stdout_and_private_jsonl(
