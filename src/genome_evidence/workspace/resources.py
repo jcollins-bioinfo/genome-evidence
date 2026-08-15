@@ -12,16 +12,19 @@ import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 from hashlib import md5, sha256
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from genome_evidence.normalization.resources import canonical_assembly, canonical_chromosome
 from genome_evidence.workspace.provisioning_progress import (
+    WORKFLOW_STAGES_V1,
     ProvisioningReporter,
     Sleeper,
     resumable_download,
@@ -38,6 +41,10 @@ DBSNP_COMMON_URLS = {
     "GRCh37": "https://hgdownload.soe.ucsc.edu/gbdb/hg19/snp/dbSnp155Common.bb",
     "GRCh38": "https://hgdownload.soe.ucsc.edu/gbdb/hg38/snp/dbSnp155Common.bb",
 }
+DBSNP_CLINVAR_URLS = {
+    "GRCh37": "https://hgdownload.soe.ucsc.edu/gbdb/hg19/snp/dbSnp155ClinVar.bb",
+    "GRCh38": "https://hgdownload.soe.ucsc.edu/gbdb/hg38/snp/dbSnp155ClinVar.bb",
+}
 FASTA_URL = "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz"
 FASTA_UPSTREAM_MD5 = "1c9dcaddfa41027f17cd8f7a82c7293b"
 KENT_VERSION = "479"
@@ -49,8 +56,9 @@ _KENT_USAGE_TOKENS = (
     "bigbednameditems file.bb name output.bed",
     "-namefile",
 )
-SELECTION_SCHEMA = "genome-evidence-normalization-resource-selection/v1"
-PROVENANCE_SCHEMA = "genome-evidence-normalization-resource-provenance/v1"
+SELECTION_SCHEMA = "genome-evidence-normalization-resource-selection/v2"
+LEGACY_SELECTION_SCHEMA = "genome-evidence-normalization-resource-selection/v1"
+PROVENANCE_SCHEMA = "genome-evidence-normalization-resource-provenance/v2"
 CHECKPOINT_SCHEMA = "genome-evidence-normalization-resource-checkpoint/v1"
 LEGACY_QUERY_CHECKPOINT_SCHEMA = "genome-evidence-dbsnp-query-checkpoint/v1"
 QUERY_CHECKPOINT_SCHEMA = "genome-evidence-dbsnp-query-checkpoint/v2"
@@ -60,7 +68,9 @@ QUERY_INDETERMINATE_SCHEMA = "genome-evidence-dbsnp-common-indeterminate/v1"
 BUNDLE_COMPLETION_SCHEMA = "genome-evidence-normalization-resource-bundle-completion/v1"
 SELECTION_PUBLICATION_SCHEMA = "genome-evidence-normalization-selection-publication/v1"
 SELECTION_COMPLETION_SCHEMA = "genome-evidence-normalization-selection-completion/v1"
-RESOURCE_ALGORITHM_VERSION = "genome-evidence-normalization-resource-builder/v4-localized-common"
+RESOURCE_ALGORITHM_VERSION = "genome-evidence-normalization-resource-builder/v5-bounded-local"
+UNRESOLVED_SCHEMA = "genome-evidence-normalization-unresolved-markers/v1"
+MIN_EXACT_SOURCE_COVERAGE = 0.80
 _BUILD_PATTERN = re.compile(r"(?:build|assembly)[\s:=]+(GRCh\d+|hg\d+|37|38)\b", re.IGNORECASE)
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _RSID = re.compile(r"^rs\d+$")
@@ -69,6 +79,13 @@ _DEFAULT_QUERY_ATTEMPTS = 4
 _DEFAULT_DBSNP_WORKERS = 6
 _DEFAULT_DOWNLOAD_SEGMENTS = 8
 _MIN_SPLIT_BATCH_SIZE = 250
+
+
+class DbSnpCoveragePolicy(StrEnum):
+    """Validated dbSNP coverage boundary for resource construction."""
+
+    BOUNDED_LOCAL = "bounded_local_v1"
+    FULL_REMOTE = "full_remote_v1"
 
 
 @dataclass(frozen=True)
@@ -92,7 +109,7 @@ class QueryResourceIdentity:
     """Stable scientific identity, deliberately separate from Kent's execution locator."""
 
     schema: str
-    kind: Literal["local-common-bigbed", "remote-full-bigbed"]
+    kind: Literal["local-common-bigbed", "local-clinvar-bigbed", "remote-full-bigbed"]
     assembly: str
     dbsnp_build: str
     canonical_source_url: str
@@ -137,6 +154,8 @@ class NormalizationResourceSelection(BaseModel):
     reference_version: str
     liftover_version: str | None = None
     provenance_manifest: str
+    coverage_policy: DbSnpCoveragePolicy = DbSnpCoveragePolicy.FULL_REMOTE
+    resource_algorithm_version: str = "legacy-pre-v5"
 
 
 @dataclass(frozen=True)
@@ -234,6 +253,7 @@ def load_normalization_resource_selection(
     source_sha256: str,
     *,
     reporter: ProvisioningReporter | None = None,
+    required_policy: DbSnpCoveragePolicy | None = None,
 ) -> NormalizationResourceSelection | None:
     """Load a durable selection and prove that it belongs to the selected private source."""
     path, _, completed_path = _selection_control_paths(root)
@@ -253,6 +273,11 @@ def load_normalization_resource_selection(
         raise ValueError(
             "normalization resources were provisioned for a different source; rerun notebook 00B"
         )
+    if required_policy is not None and (
+        selection.coverage_policy != required_policy
+        or selection.resource_algorithm_version != RESOURCE_ALGORITHM_VERSION
+    ):
+        return None
     if canonical_assembly(selection.source_assembly) != selection.source_assembly:
         raise ValueError("normalization resource selection has an unsupported source assembly")
     required_artifacts = {
@@ -277,7 +302,8 @@ def load_normalization_resource_selection(
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise ValueError("normalization resource provenance manifest is invalid") from error
     if (
-        provenance.get("schema") != PROVENANCE_SCHEMA
+        provenance.get("schema")
+        not in {PROVENANCE_SCHEMA, "genome-evidence-normalization-resource-provenance/v1"}
         or provenance.get("source_sha256") != source_sha256
         or provenance.get("source_assembly") != selection.source_assembly
     ):
@@ -587,16 +613,25 @@ def build_marker_resources(
     source_assembly: str,
     source_variants: Sequence[BigBedVariant],
     target_variants: Sequence[BigBedVariant],
-) -> tuple[list[dict[str, Any]], dict[str, list[list[str | int]]], dict[str, int]]:
+) -> tuple[list[dict[str, Any]], dict[str, list[list[str | int]]], dict[str, int | float]]:
     """Create exact-coordinate SNV definitions and conservative cross-build mappings."""
     marker_index = {
         (x.marker_id, x.chromosome, x.position) for x in markers if x.marker_id.startswith("rs")
     }
-    accepted_source = [
+    candidate_source = [
         row
         for row in source_variants
         if (row.marker_id, row.chromosome, row.position) in marker_index
     ]
+    by_marker: dict[str, list[BigBedVariant]] = {}
+    for row in candidate_source:
+        by_marker.setdefault(row.marker_id, []).append(row)
+    ambiguous_ids = {
+        marker_id
+        for marker_id, rows in by_marker.items()
+        if len({(row.chromosome, row.position, row.reference, row.alternates) for row in rows}) > 1
+    }
+    accepted_source = [row for row in candidate_source if row.marker_id not in ambiguous_ids]
     target_by_id: dict[str, list[BigBedVariant]] = {}
     for row in target_variants:
         target_by_id.setdefault(row.marker_id, []).append(row)
@@ -657,13 +692,17 @@ def build_marker_resources(
         for key, values in sorted(mapping_sets.items())
     }
     source_ids = {row.marker_id for row in accepted_source}
-    stats = {
+    stats: dict[str, int | float] = {
         "source_marker_count": len(markers),
         "rsid_marker_count": len({x.marker_id for x in markers if x.marker_id.startswith("rs")}),
         "defined_marker_count": len({row["marker_id"] for row in definitions}),
         "definition_count": len(definitions),
         "cross_build_mapped_marker_count": len(mapped_ids),
         "exact_source_placement_count": len(source_ids),
+        "ambiguous_marker_count": len(ambiguous_ids),
+        "unsupported_marker_count": max(
+            len(source_ids) - len({row["marker_id"] for row in definitions}), 0
+        ),
     }
     return definitions, mappings, stats
 
@@ -1558,6 +1597,7 @@ def _query_common_batches(
     timeout_seconds: int,
     sleep: Sleeper,
     label: str,
+    progress_stage: str | None = None,
 ) -> _CommonQueryResult:
     """Query common batches independently and retain valid siblings of rejected leaves."""
     outputs: list[Path] = []
@@ -1607,8 +1647,9 @@ def _query_common_batches(
         total_batches=total_batches,
         indeterminate_leaf_count=0,
     )
+    workflow_stage = progress_stage or f"{assembly.lower()}_common"
     reporter.workflow_progress(
-        f"{assembly.lower()}_common",
+        workflow_stage,
         resumed_identifiers / len(identifiers) if identifiers else 1.0,
         force=True,
         resumed_identifiers=resumed_identifiers,
@@ -1657,7 +1698,7 @@ def _query_common_batches(
             indeterminate_leaf_count=len(indeterminate_leaves),
         )
         reporter.workflow_progress(
-            f"{assembly.lower()}_common",
+            workflow_stage,
             completed_identifiers / len(identifiers) if identifiers else 1.0,
             force=True,
             completed_batches=completed_batches,
@@ -1708,7 +1749,7 @@ def _query_common_first(
 ) -> tuple[Path, dict[str, Any]]:
     """Use a local common BigBed as a non-authoritative accelerator, then full fallback."""
     prefix = assembly.lower()
-    reporter.workflow_progress(f"{prefix}_cache", 0.0, force=True)
+    reporter.workflow_progress(f"{prefix}_common_cache", 0.0, force=True)
     common_cache = checkpoint_root / "common" / assembly.lower() / "dbSnp155Common.bb"
     common_manifest: dict[str, Any] | None = None
     common_result: _CommonQueryResult | None = None
@@ -1748,7 +1789,7 @@ def _query_common_first(
         )
         common_manifest = {"status": "unavailable", "canonical_url": DBSNP_COMMON_URLS[assembly]}
     else:
-        reporter.workflow_progress(f"{prefix}_cache", 1.0, status="complete", force=True)
+        reporter.workflow_progress(f"{prefix}_common_cache", 1.0, status="complete", force=True)
         common_sha256 = common_manifest.get("sha256")
         common_byte_size = common_manifest.get("byte_size")
         if not isinstance(common_sha256, str) or not isinstance(common_byte_size, int):
@@ -1793,9 +1834,9 @@ def _query_common_first(
         reporter.workflow_progress(f"{prefix}_common", 1.0, status="complete", force=True)
     if common_result is None:
         unresolved = tuple(identifiers)
-        reporter.workflow_progress(f"{prefix}_cache", 1.0, status="complete", force=True)
+        reporter.workflow_progress(f"{prefix}_common_cache", 1.0, status="complete", force=True)
         reporter.workflow_progress(f"{prefix}_common", 1.0, status="skipped", force=True)
-    reporter.workflow_progress(f"{prefix}_fallback", 0.0, force=True)
+    reporter.workflow_progress("coverage", 0.0, force=True)
     # v1 placed full-query batches directly below dbsnp/<assembly>/<query-key>. Rebuild
     # that deterministic plan and accept only independently valid completion manifests.
     legacy_outputs: list[Path] = []
@@ -1863,7 +1904,7 @@ def _query_common_first(
     common_output = common_result.output if common_result else None
     paths = [path for path in (common_output, *legacy_outputs, fallback) if path is not None]
     _merge_query_outputs(paths, merged)
-    reporter.workflow_progress(f"{prefix}_fallback", 1.0, status="complete", force=True)
+    reporter.workflow_progress("coverage", 1.0, status="complete", force=True)
     return merged, {
         "common": common_manifest,
         "common_output": (
@@ -1889,6 +1930,116 @@ def _query_common_first(
         "legacy_batch_count": len(legacy_outputs),
         "workers": workers,
         "batch_size": batch_size,
+        "algorithm_version": RESOURCE_ALGORITHM_VERSION,
+    }
+
+
+def _query_bounded_local_tracks(
+    tool: Path,
+    tool_sha256: str,
+    assembly: str,
+    identifiers: Sequence[str],
+    checkpoint_root: Path,
+    work: Path,
+    runner: Runner,
+    reporter: ProvisioningReporter,
+    *,
+    download: Download | None,
+    batch_size: int,
+    attempts: int,
+    timeout_seconds: int,
+    download_segments: int,
+    sleep: Sleeper,
+    label: str,
+) -> tuple[Path, dict[str, Any]]:
+    """Query checksum-bound Common then ClinVar locally; never use the full BigBed."""
+    results: list[_CommonQueryResult] = []
+    manifests: dict[str, Any] = {}
+    remaining = tuple(identifiers)
+    for track, urls, filename, kind in (
+        ("common", DBSNP_COMMON_URLS, "dbSnp155Common.bb", "local-common-bigbed"),
+        ("clinvar", DBSNP_CLINVAR_URLS, "dbSnp155ClinVar.bb", "local-clinvar-bigbed"),
+    ):
+        cache_stage = f"{assembly.lower()}_{track}_cache"
+        query_stage = f"{assembly.lower()}_{track}"
+        reporter.workflow_progress(cache_stage, 0.0, force=True)
+        cache = checkpoint_root / track / assembly.lower() / filename
+        if download is None:
+            cache, manifest = segmented_download(
+                urls[assembly],
+                cache,
+                reporter,
+                concurrency=download_segments,
+                attempts=attempts,
+                timeout_seconds=timeout_seconds,
+                sleep=sleep,
+            )
+        else:
+            _obtain_download(urls[assembly], cache, download, reporter, sleep=sleep)
+            manifest = {
+                "remote_identity": {"canonical_url": urls[assembly]},
+                "sha256": _hash(cache),
+                "byte_size": cache.stat().st_size,
+                "segment_concurrency": 0,
+            }
+        local = work / track / assembly.lower() / filename
+        local.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(cache, local)
+        if _hash(local) != manifest["sha256"]:
+            raise OSError(f"local {track} dbSNP copy failed checksum verification")
+        reporter.workflow_progress(cache_stage, 1.0, status="complete", force=True)
+        content_sha256 = manifest.get("sha256")
+        byte_size = manifest.get("byte_size")
+        if not isinstance(content_sha256, str) or not isinstance(byte_size, int):
+            raise RuntimeError(f"validated {track} cache identity is incomplete")
+        identity = QueryResourceIdentity(
+            QUERY_RESOURCE_IDENTITY_SCHEMA,
+            cast(
+                Literal["local-common-bigbed", "local-clinvar-bigbed"],
+                kind,
+            ),
+            assembly,
+            DBSNP_BUILD,
+            urls[assembly],
+            content_sha256,
+            byte_size,
+        )
+        result = _query_common_batches(
+            tool,
+            tool_sha256,
+            local,
+            identity,
+            assembly,
+            remaining,
+            checkpoint_root / f"{track}-query",
+            work,
+            runner,
+            reporter,
+            batch_size=batch_size,
+            attempts=attempts,
+            timeout_seconds=timeout_seconds,
+            sleep=sleep,
+            label=f"{label}-{track}",
+            progress_stage=query_stage,
+        )
+        results.append(result)
+        manifests[track] = manifest
+        remaining = tuple(
+            value for value in remaining if value not in set(result.returned_identifiers)
+        )
+        reporter.workflow_progress(query_stage, 1.0, status="complete", force=True)
+    merged = checkpoint_root / "merged" / f"{label}-bounded-local.bed"
+    _merge_query_outputs([result.output for result in results if result.output is not None], merged)
+    common_ids = set(results[0].returned_identifiers)
+    clinvar_ids = set(results[1].returned_identifiers) - common_ids
+    union_ids = common_ids | clinvar_ids
+    return merged, {
+        "tracks": manifests,
+        "common_returned_count": len(common_ids),
+        "clinvar_supplemental_returned_count": len(clinvar_ids),
+        "union_returned_count": len(union_ids),
+        "unresolved_identifier_count": len(set(identifiers) - union_ids),
+        "complete_remote_queried": False,
         "algorithm_version": RESOURCE_ALGORITHM_VERSION,
     }
 
@@ -2428,6 +2579,17 @@ def provision_personal_normalization_resources(
 
     root = validate_workspace(root)
     env = os.environ if environment is None else environment
+    try:
+        coverage_policy = DbSnpCoveragePolicy(
+            env.get(
+                "GENOME_EVIDENCE_DBSNP_COVERAGE_POLICY",
+                DbSnpCoveragePolicy.BOUNDED_LOCAL.value,
+            )
+        )
+    except ValueError as error:
+        raise ValueError(
+            "GENOME_EVIDENCE_DBSNP_COVERAGE_POLICY must be bounded_local_v1 or full_remote_v1"
+        ) from error
     source, source_digest = _selected_source(root, env)
     run_key = sha256(
         f"{source_digest}|dbSNP{DBSNP_BUILD}|Kent{KENT_VERSION}|{FASTA_UPSTREAM_MD5}".encode()
@@ -2455,6 +2617,17 @@ def provision_personal_normalization_resources(
                 "privacy.boundary",
                 "Progress contains aggregate counts and public resource metadata only; "
                 "genotypes and individual marker identifiers are never logged or transmitted.",
+            )
+            reporter.info(
+                "coverage.policy",
+                f"Coverage policy: {coverage_policy.value}\nComplete remote dbSNP query: "
+                + (
+                    "enabled (advanced opt-in)"
+                    if coverage_policy is DbSnpCoveragePolicy.FULL_REMOTE
+                    else "disabled"
+                ),
+                coverage_policy=coverage_policy.value,
+                complete_remote_dbsnp_query=(coverage_policy is DbSnpCoveragePolicy.FULL_REMOTE),
             )
             source_assembly, markers = read_source_markers(
                 source, env.get("GENOME_EVIDENCE_SOURCE_BUILD")
@@ -2503,7 +2676,7 @@ def provision_personal_normalization_resources(
             local_free = shutil.disk_usage(temporary_parent or tempfile.gettempdir()).free
             reporter.info(
                 "strategy.configured",
-                "Strategy: common-first + bounded-parallel fallback. Interrupted work is reusable.",
+                f"Strategy: {coverage_policy.value}. Interrupted local work is reusable.",
                 configured_workers=dbsnp_workers,
                 download_segment_concurrency=download_segments,
                 drive_free_bytes=drive_free,
@@ -2606,6 +2779,7 @@ def provision_personal_normalization_resources(
                     root,
                     source_digest,
                     reporter=reporter,
+                    required_policy=coverage_policy,
                 )
             if existing is not None:
                 publishing_path.unlink(missing_ok=True)
@@ -2625,19 +2799,7 @@ def provision_personal_normalization_resources(
                     defined_marker_count=defined,
                     mapped_marker_count=mapped,
                 )
-                for completed_stage in (
-                    "kent",
-                    "grch37_cache",
-                    "grch37_common",
-                    "grch37_fallback",
-                    "grch38_cache",
-                    "grch38_common",
-                    "grch38_fallback",
-                    "fasta_acquire",
-                    "fasta_build",
-                    "resources",
-                    "publish",
-                ):
+                for completed_stage, _, _ in WORKFLOW_STAGES_V1:
                     reporter.workflow_progress(completed_stage, 1.0, status="resumed", force=True)
                 return ProvisioningResult(
                     existing,
@@ -2664,12 +2826,18 @@ def provision_personal_normalization_resources(
                 reporter.workflow_progress("kent", 1.0, status="complete", force=True)
                 if source_assembly == "GRCh38":
                     for skipped_stage in (
-                        "grch37_cache",
+                        "grch37_common_cache",
                         "grch37_common",
-                        "grch37_fallback",
+                        "grch37_clinvar_cache",
+                        "grch37_clinvar",
                     ):
                         reporter.workflow_progress(skipped_stage, 1.0, status="skipped", force=True)
-                source_bed, source_query_provenance = _query_common_first(
+                query_strategy = (
+                    _query_bounded_local_tracks
+                    if coverage_policy is DbSnpCoveragePolicy.BOUNDED_LOCAL
+                    else _query_common_first
+                )
+                source_bed, source_query_provenance = query_strategy(
                     tool,
                     tool_sha256,
                     source_assembly,
@@ -2683,15 +2851,19 @@ def provision_personal_normalization_resources(
                     timeout_seconds=query_timeout,
                     sleep=sleep,
                     label=source_assembly.lower(),
-                    workers=dbsnp_workers,
                     download_segments=download_segments,
                     download=download,
+                    **(
+                        {"workers": dbsnp_workers}
+                        if coverage_policy is DbSnpCoveragePolicy.FULL_REMOTE
+                        else {}
+                    ),
                 )
                 if source_assembly == "GRCh38":
                     target_bed = source_bed
                     target_query_provenance = source_query_provenance
                 else:
-                    target_bed, target_query_provenance = _query_common_first(
+                    target_bed, target_query_provenance = query_strategy(
                         tool,
                         tool_sha256,
                         "GRCh38",
@@ -2705,9 +2877,13 @@ def provision_personal_normalization_resources(
                         timeout_seconds=query_timeout,
                         sleep=sleep,
                         label="grch38",
-                        workers=dbsnp_workers,
                         download_segments=download_segments,
                         download=download,
+                        **(
+                            {"workers": dbsnp_workers}
+                            if coverage_policy is DbSnpCoveragePolicy.FULL_REMOTE
+                            else {}
+                        ),
                     )
                 reporter.info(
                     "dbsnp.parse",
@@ -2718,10 +2894,64 @@ def provision_personal_normalization_resources(
                 definitions, mappings, stats = build_marker_resources(
                     markers, source_assembly, source_variants, target_variants
                 )
+                requested_count = len(identifiers)
+                exact_count = int(stats["exact_source_placement_count"])
+                observed_coverage = exact_count / requested_count
+                if observed_coverage < MIN_EXACT_SOURCE_COVERAGE:
+                    raise ValueError(
+                        "gross dbSNP source-definition coverage is below the 80% sanity "
+                        "threshold; likely causes include a wrong source assembly, corrupt "
+                        "input, or incompatible UCSC tracks"
+                    )
                 if not definitions:
                     raise ValueError(
                         "dbSNP extraction produced no exact source-build SNV definitions"
                     )
+                defined_ids = {str(row["marker_id"]) for row in definitions}
+                exact_ids = {
+                    row.marker_id
+                    for row in source_variants
+                    if any(
+                        marker.marker_id == row.marker_id
+                        and marker.chromosome == row.chromosome
+                        and marker.position == row.position
+                        for marker in markers
+                    )
+                }
+                returned_ids = {row.marker_id for row in source_variants}
+                unresolved_records = []
+                for marker in markers:
+                    if not _RSID.fullmatch(marker.marker_id) or marker.marker_id in defined_ids:
+                        continue
+                    reason = (
+                        "absent"
+                        if marker.marker_id not in returned_ids
+                        else "coordinate-incompatible"
+                        if marker.marker_id not in exact_ids
+                        else "ambiguous"
+                        if sum(row.marker_id == marker.marker_id for row in source_variants) > 1
+                        else "unsupported"
+                    )
+                    unresolved_records.append(
+                        {
+                            "marker_id": marker.marker_id,
+                            "source_chromosome": marker.chromosome,
+                            "source_coordinate": marker.position,
+                            "reason": reason,
+                            "tracks_queried": ["common", "clinvar"],
+                        }
+                    )
+                stats.update(
+                    {
+                        "requested_canonical_rsid_count": requested_count,
+                        "unresolved_marker_count": requested_count - len(defined_ids),
+                        "unresolved_fraction": (requested_count - len(defined_ids))
+                        / requested_count,
+                        "gross_coverage_threshold": MIN_EXACT_SOURCE_COVERAGE,
+                        "gross_coverage_observed_fraction": observed_coverage,
+                    }
+                )
+                reporter.workflow_progress("coverage", 1.0, status="complete", force=True)
                 reporter.success(
                     "markers.built",
                     f"Built {stats['definition_count']:,} exact SNV definitions for "
@@ -2759,6 +2989,7 @@ def provision_personal_normalization_resources(
                     root / f"references/liftover/grch37_to_grch38/dbsnp{DBSNP_BUILD}-{bundle_id}"
                 )
                 marker_path = marker_dir / "marker-definitions.json"
+                unresolved_path = marker_dir / "unresolved-markers.json"
                 source_extract_path = marker_dir / "dbsnp-source-extract.bed"
                 target_extract_path = marker_dir / "dbsnp-grch38-extract.bed"
                 liftover_path = liftover_dir / "variant-coordinate-map.json"
@@ -2793,6 +3024,21 @@ def provision_personal_normalization_resources(
                     event="publish.marker-definitions",
                     repair_incomplete=not bundle_committed,
                 )
+                _idempotent_json(
+                    unresolved_path,
+                    {
+                        "schema": UNRESOLVED_SCHEMA,
+                        "algorithm_version": RESOURCE_ALGORITHM_VERSION,
+                        "source_assembly": source_assembly,
+                        "source_sha256": source_digest,
+                        "records": unresolved_records,
+                    },
+                    reporter,
+                    event="publish.unresolved-markers",
+                    repair_incomplete=not bundle_committed,
+                )
+                with suppress(OSError):
+                    os.chmod(unresolved_path, 0o600)
                 _idempotent_copy(
                     source_bed,
                     source_extract_path,
@@ -2825,6 +3071,10 @@ def provision_personal_normalization_resources(
                         "sha256": _hash(source_extract_path),
                         "byte_size": source_extract_path.stat().st_size,
                     },
+                    _workspace_relative(root, unresolved_path): {
+                        "sha256": _hash(unresolved_path),
+                        "byte_size": unresolved_path.stat().st_size,
+                    },
                     _workspace_relative(root, target_extract_path): {
                         "sha256": _hash(target_extract_path),
                         "byte_size": target_extract_path.stat().st_size,
@@ -2854,13 +3104,38 @@ def provision_personal_normalization_resources(
                         "212883767-Which-Reference-Genome-and-Strand-Does-23andMe-Use"
                     ),
                     "dbsnp_build": DBSNP_BUILD,
-                    "dbsnp_source_url": DBSNP_URLS[source_assembly],
-                    "dbsnp_target_url": DBSNP_URLS["GRCh38"],
+                    "coverage_policy": coverage_policy.value,
+                    "complete_remote_dbsnp_queried": (
+                        coverage_policy is DbSnpCoveragePolicy.FULL_REMOTE
+                    ),
                     "dbsnp_query_batch_size": batch_size,
                     "dbsnp_workers": dbsnp_workers,
                     "common_download_segments": download_segments,
                     "dbsnp_source_query": source_query_provenance,
                     "dbsnp_target_query": target_query_provenance,
+                    "coverage": {
+                        "requested_canonical_rsid_count": requested_count,
+                        "common_returned_count": source_query_provenance.get(
+                            "common_returned_count",
+                            source_query_provenance.get("common_hit_count", 0),
+                        ),
+                        "clinvar_supplemental_returned_count": source_query_provenance.get(
+                            "clinvar_supplemental_returned_count", 0
+                        ),
+                        "union_returned_count": source_query_provenance.get(
+                            "union_returned_count", requested_count
+                        ),
+                        "exact_source_placement_count": exact_count,
+                        "defined_marker_count": len(defined_ids),
+                        "ambiguous_count": int(stats["ambiguous_marker_count"]),
+                        "unsupported_count": int(stats["unsupported_marker_count"]),
+                        "unresolved_count": requested_count - len(defined_ids),
+                        "unresolved_fraction": (requested_count - len(defined_ids))
+                        / requested_count,
+                        "cross_build_mapped_count": int(stats["cross_build_mapped_marker_count"]),
+                        "gross_coverage_threshold": MIN_EXACT_SOURCE_COVERAGE,
+                        "gross_coverage_observed_fraction": observed_coverage,
+                    },
                     "kent_tool_url": KENT_TOOL_URL,
                     "kent_version": KENT_VERSION,
                     "kent_tool_sha256": tool_sha256,
@@ -2934,6 +3209,8 @@ def provision_personal_normalization_resources(
                         else None
                     ),
                     provenance_manifest=_workspace_relative(root, provenance_path),
+                    coverage_policy=coverage_policy,
+                    resource_algorithm_version=RESOURCE_ALGORITHM_VERSION,
                 )
                 selection_path = _publish_selection(
                     root,
@@ -2949,7 +3226,10 @@ def provision_personal_normalization_resources(
             )
             reporter.success(
                 "session.complete",
-                "Provisioning completed; durable selection was published last.",
+                "Provisioning completed; durable selection was published last. "
+                f"Defined {defined / len(identifiers):.1%}; unresolved coverage "
+                f"{(len(identifiers) - defined) / len(identifiers):.1%} "
+                "(not biological absence).",
                 defined_marker_count=defined,
                 mapped_marker_count=mapped,
                 unresolved_marker_count=max(len(markers) - defined, 0),

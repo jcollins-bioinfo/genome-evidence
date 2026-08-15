@@ -36,19 +36,18 @@ These commands report aggregate status only. Use the public Python APIs `validat
 
 `genome-evidence workspace init` creates a provider-neutral, non-destructive tree. Durable PGx bundles belong under `references/pharmacogenomics/`, evictable source caches under `cache/{clinpgx,pharmvar,pharmcat}/`, and private M8 outputs under `runs/m8_pharmacogenomics/`. The canonical Colab location remains `/content/drive/MyDrive/genome-evidence-private`; local/offline roots are supported and preferred for privacy-sensitive work.
 
-Notebook 00B provisions the production normalization resources required by the source imported in notebook 00. It downloads the pinned ~1.8 GiB `dbSnp155Common.bb` for each required assembly with resumable ranges, queries a verified local `/content` copy, and sends only common-missing or validation-indeterminate rsIDs through a bounded parallel authoritative query of the complete remote index. Query checkpoints are bound to the pinned URL and verified common-file content, never that disposable local path; compatible legacy checkpoints are narrowly migrated. It never downloads the 65/68 GiB complete BigBeds and never transmits genotype calls. It verifies UCSC's GRCh38 FASTA checksum, builds the FAI and any conservative variant-specific GRCh37→GRCh38 map, and publishes provenance plus durable selectors last. Notebook 01 consumes that selection, computes ephemerally, and publishes re-hashed M1/M2 runs.
+Notebook 00B provisions the production normalization resources required by the source imported in notebook 00. Its default `bounded_local_v1` policy downloads the pinned ~1.8 GiB Common and ~75 MiB ClinVar BigBeds for each required assembly with resumable ranges, queries verified local `/content` copies, and asks ClinVar only for Common-unresolved rsIDs. Query checkpoints are bound to pinned URLs and verified content, never disposable local paths; compatible legacy Common checkpoints are narrowly migrated. It neither contacts nor downloads the 65/68 GiB complete BigBeds and never transmits genotype calls. Residual unresolved coverage is recorded privately and publication fails closed only below the explicit 80% exact-source-placement sanity threshold. It verifies UCSC's GRCh38 FASTA checksum, builds the FAI and any conservative variant-specific GRCh37→GRCh38 map, and publishes provenance plus durable selectors last. Notebook 01 consumes that selection, computes ephemerally, and publishes re-hashed M1/M2 runs.
 
 00B is restartable at operational boundaries. It writes privacy-safe progress both to an
 in-place notebook dashboard and to append-only stdout/JSONL checkpoints. The dashboard
-labels its versioned, weighted 12-stage value as **workflow completion** (not bytes or an
-exact wall-clock fraction), while common-query bars count disposition-complete top-level
-batches without inflating totals for adaptive split children. Set
+labels its versioned, weighted 15-stage value as **workflow completion** (not bytes or an
+exact wall-clock fraction), while local-query bars report completed identifiers without treating Kent queries as byte transfers. Set
 `GENOME_EVIDENCE_PROGRESS_STYLE=auto|unicode|ascii|plain` to select the dependency-light
 renderer. Events are written to
 `logs/notebooks/00b/<run-key>/events.jsonl`, while verified download and dbSNP-query
 checkpoints live under `cache/downloads/normalization/v1/<run-key>/`. Rerunning the
 provisioning cell verifies and reuses completed batches, persistent indeterminate leaves,
-and checksum-valid completed downloads without probing mutable HTTP headers. A rejected common-query leaf is localized: validated sibling batches remain usable, while only that leaf and genuine common misses enter full-index fallback. Full-file
+and checksum-valid completed downloads without probing mutable HTTP headers. The default `bounded_local_v1` policy queries checksum-bound local Common tracks and then local ClinVar tracks only for Common-unresolved rsIDs. Residual missing definitions remain explicitly unresolved and complete remote BigBeds are never contacted. Full-file
 transfers and byte-processing stages report byte rates and ETA; sparse remote BigBed
 queries report identifiers per second because the Kent utility does not expose truthful
 per-request byte telemetry. Last-written bundle and selector completion markers make
@@ -74,7 +73,7 @@ The [canonical notebook index](notebooks/README.md) lists all nine notebooks exa
 
 ## Development, versioning, and roadmap
 
-The package is pre-1.0 (`0.4.5` prepared): public APIs and schemas may evolve only under the documented compatibility/deprecation policy. This patch makes resumable 00B checkpoints portable across runtimes without changing the public selector schema or scientific normalization rules. It does not tag, publish, sign, or create a release. Follow the [roadmap](docs/roadmap.md), ADRs, documentation expectations in `AGENTS.md`, and MIT [license](LICENSE).
+The package is pre-1.0 (`0.5.0` prepared): public APIs and schemas may evolve only under the documented compatibility/deprecation policy. This architectural update versions the selector and provenance schemas while retaining an explicit compatibility path for legacy selectors and immutable bundles. It does not tag, publish, sign, or create a release. Follow the [roadmap](docs/roadmap.md), ADRs, documentation expectations in `AGENTS.md`, and MIT [license](LICENSE).
 
 CI runs these locked gates:
 

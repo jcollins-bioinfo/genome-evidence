@@ -26,15 +26,18 @@ ProgressStyle = Literal["auto", "unicode", "ascii", "plain"]
 WORKFLOW_STAGES_V1: tuple[tuple[str, str, float], ...] = (
     ("preflight", "preflight/source validation", 0.03),
     ("kent", "Kent tool validation", 0.04),
-    ("grch37_cache", "GRCh37 common cache acquisition/verification", 0.13),
-    ("grch37_common", "GRCh37 common lookup", 0.10),
-    ("grch37_fallback", "GRCh37 authoritative fallback", 0.12),
-    ("grch38_cache", "GRCh38 common cache acquisition/verification", 0.13),
-    ("grch38_common", "GRCh38 common lookup", 0.10),
-    ("grch38_fallback", "GRCh38 authoritative fallback", 0.12),
+    ("grch37_common_cache", "GRCh37 Common cache", 0.10),
+    ("grch37_common", "GRCh37 Common local lookup", 0.08),
+    ("grch37_clinvar_cache", "GRCh37 ClinVar cache", 0.05),
+    ("grch37_clinvar", "GRCh37 ClinVar supplemental lookup", 0.04),
+    ("grch38_common_cache", "GRCh38 Common cache", 0.10),
+    ("grch38_common", "GRCh38 Common local lookup", 0.08),
+    ("grch38_clinvar_cache", "GRCh38 ClinVar cache", 0.05),
+    ("grch38_clinvar", "GRCh38 ClinVar supplemental lookup", 0.04),
+    ("coverage", "deterministic merge and coverage accounting", 0.05),
     ("fasta_acquire", "FASTA acquisition and verification", 0.08),
     ("fasta_build", "FASTA decompression and FAI construction", 0.06),
-    ("resources", "marker/liftover resource construction", 0.05),
+    ("resources", "marker/liftover resource construction", 0.16),
     ("publish", "artifact verification and selector-last publication", 0.04),
 )
 
@@ -69,6 +72,13 @@ class WorkflowProgress:
         self._floor = 0.0
 
     def update(self, stage: str, fraction: float) -> float:
+        # Compatibility for telemetry callers from the pre-0.5 full-remote workflow.
+        stage = {
+            "grch37_fallback": "coverage",
+            "grch38_fallback": "coverage",
+            "grch37_cache": "grch37_common_cache",
+            "grch38_cache": "grch38_common_cache",
+        }.get(stage, stage)
         if stage not in self._fractions:
             raise KeyError(stage)
         self._fractions[stage] = max(self._fractions[stage], min(max(fraction, 0.0), 1.0))

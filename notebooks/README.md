@@ -14,7 +14,7 @@ The locked local environment and `synthetic_ci` nbmake CI are canonical. `person
 
 ## 00B progress and resumption
 
-00B uses **common-first + bounded-parallel fallback**. It downloads pinned common
+00B defaults to **bounded local Common-plus-ClinVar coverage**. It downloads pinned Common and ClinVar
 BigBeds with 8 resumable segments by default, queries verified local copies, then sends
 only common-missing and common-indeterminate identifiers to the authoritative complete remote indexes with 6 isolated-cache Kent
 workers. Configure `GENOME_EVIDENCE_COMMON_DOWNLOAD_SEGMENTS` and
@@ -32,7 +32,7 @@ identifiers.
 
 Durable state is stored under
 `cache/downloads/normalization/v1/<run-key>/`. A rerun validates each completion marker
-and checksum before reusing it. Successful dbSNP batches and adaptive-split children are not repeated. A deterministic common-output rejection is categorized without identifiers, localized to its minimum leaf, and routed to full fallback without discarding validated siblings. An
+and checksum before reusing it. Successful local query batches are not repeated. ClinVar is queried only for Common-unresolved identifiers; residual coverage is recorded privately and never interpreted as biological absence. An
 interrupted HTTP transfer continues from its retained `.part` bytes when the server
 honors the requested byte range. A partial gzip decompression restarts that transform
 from the retained, checksum-verified archive because gzip decoder state cannot safely be

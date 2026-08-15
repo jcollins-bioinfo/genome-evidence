@@ -18,6 +18,7 @@ from .personal import (
     run_personal_m1_m2,
 )
 from .resources import (
+    DbSnpCoveragePolicy,
     NormalizationResourceSelection,
     ProvisioningIncomplete,
     ProvisioningResult,
@@ -25,6 +26,7 @@ from .resources import (
 )
 
 __all__ = [
+    "DbSnpCoveragePolicy",
     "WorkspaceConfig",
     "PersonalNormalizationResult",
     "NormalizationResourceSelection",

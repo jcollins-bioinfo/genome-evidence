@@ -62,7 +62,7 @@ def test_provisioned_resources_drive_personal_m1_m2(
 
     provisioned = provision_personal_normalization_resources(
         root,
-        {},
+        {"GENOME_EVIDENCE_DBSNP_COVERAGE_POLICY": "full_remote_v1"},
         working_root=tmp_path / "work",
         download=fake_download,
         runner=fake_runner,
@@ -153,6 +153,7 @@ def test_provisioning_resumes_after_target_dbsnp_interruption(
         raise AssertionError(f"unexpected indexed query: {args[2]}")
 
     environment = {
+        "GENOME_EVIDENCE_DBSNP_COVERAGE_POLICY": "full_remote_v1",
         "GENOME_EVIDENCE_DBSNP_BATCH_SIZE": "250",
         "GENOME_EVIDENCE_QUERY_ATTEMPTS": "1",
         "GENOME_EVIDENCE_QUERY_TIMEOUT_SECONDS": "60",
