@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.5 - Unreleased
+
+- Bind dbSNP query checkpoint v2 manifests to explicit, stable resource identities rather
+  than runtime-local Kent execution paths. Narrowly validate and migrate compatible v1
+  common-query checkpoints from workflow-owned Colab temporary paths.
+- Persist content-bound common-indeterminate leaf dispositions, initialize aggregate
+  progress from verified work, and propagate every top-level common-batch completion to
+  the overall notebook dashboard without counting resumed identifiers as session throughput.
+- Treat checksum-valid completed common BigBeds as immutable local objects by default;
+  mutable origin headers are still enforced for incomplete segmented transfers.
+- Render the in-place Jupyter dashboard as escaped preformatted HTML instead of a quoted
+  Python string, without changing the public normalization selection schema.
+
 ## 0.4.4 - Unreleased
 
 - Restore top-level common-query aggregate progress and add a monotonic, versioned

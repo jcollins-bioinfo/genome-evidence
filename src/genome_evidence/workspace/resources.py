@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import md5, sha256
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -52,8 +52,11 @@ _KENT_USAGE_TOKENS = (
 SELECTION_SCHEMA = "genome-evidence-normalization-resource-selection/v1"
 PROVENANCE_SCHEMA = "genome-evidence-normalization-resource-provenance/v1"
 CHECKPOINT_SCHEMA = "genome-evidence-normalization-resource-checkpoint/v1"
-QUERY_CHECKPOINT_SCHEMA = "genome-evidence-dbsnp-query-checkpoint/v1"
+LEGACY_QUERY_CHECKPOINT_SCHEMA = "genome-evidence-dbsnp-query-checkpoint/v1"
+QUERY_CHECKPOINT_SCHEMA = "genome-evidence-dbsnp-query-checkpoint/v2"
+QUERY_RESOURCE_IDENTITY_SCHEMA = "genome-evidence-dbsnp-query-resource/v1"
 QUERY_SPLIT_SCHEMA = "genome-evidence-dbsnp-query-split/v1"
+QUERY_INDETERMINATE_SCHEMA = "genome-evidence-dbsnp-common-indeterminate/v1"
 BUNDLE_COMPLETION_SCHEMA = "genome-evidence-normalization-resource-bundle-completion/v1"
 SELECTION_PUBLICATION_SCHEMA = "genome-evidence-normalization-selection-publication/v1"
 SELECTION_COMPLETION_SCHEMA = "genome-evidence-normalization-selection-completion/v1"
@@ -82,6 +85,42 @@ class BigBedVariant:
     marker_id: str
     reference: str
     alternates: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class QueryResourceIdentity:
+    """Stable scientific identity, deliberately separate from Kent's execution locator."""
+
+    schema: str
+    kind: Literal["local-common-bigbed", "remote-full-bigbed"]
+    assembly: str
+    dbsnp_build: str
+    canonical_source_url: str
+    content_sha256: str | None
+    byte_size: int | None
+
+    def as_dict(self) -> dict[str, str | int | None]:
+        return {
+            "schema": self.schema,
+            "kind": self.kind,
+            "assembly": self.assembly,
+            "dbsnp_build": self.dbsnp_build,
+            "canonical_source_url": self.canonical_source_url,
+            "content_sha256": self.content_sha256,
+            "byte_size": self.byte_size,
+        }
+
+
+def _remote_query_identity(assembly: str, canonical_url: str) -> QueryResourceIdentity:
+    return QueryResourceIdentity(
+        QUERY_RESOURCE_IDENTITY_SCHEMA,
+        "remote-full-bigbed",
+        assembly,
+        DBSNP_BUILD,
+        canonical_url,
+        None,
+        None,
+    )
 
 
 class NormalizationResourceSelection(BaseModel):
@@ -727,8 +766,10 @@ def _valid_query_checkpoint(
     identifiers: Sequence[str],
     identifiers_sha256: str,
     assembly: str,
-    canonical_url: str,
+    resource_identity: QueryResourceIdentity,
     tool_sha256: str,
+    allow_legacy_common_migration: bool = False,
+    reporter: ProvisioningReporter | None = None,
 ) -> Path | None:
     output = directory / "records.bed"
     manifest_path = directory / "COMPLETED.json"
@@ -736,13 +777,46 @@ def _valid_query_checkpoint(
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
         return None
+    common_identity = resource_identity.kind == "local-common-bigbed"
+    stable_matches = (
+        manifest.get("schema") == QUERY_CHECKPOINT_SCHEMA
+        and manifest.get("resource_identity") == resource_identity.as_dict()
+    )
+    legacy_remote_matches = (
+        resource_identity.kind == "remote-full-bigbed"
+        and manifest.get("schema") == LEGACY_QUERY_CHECKPOINT_SCHEMA
+        and manifest.get("canonical_url") == resource_identity.canonical_source_url
+    )
+    legacy_locator = manifest.get("canonical_url")
+    directory_parts = directory.resolve().parts
+    expected_plan = f"{assembly.lower()}-common"
+    legacy_tree_ok = (
+        "normalization" in directory_parts
+        and "v1" in directory_parts
+        and "dbsnp" in directory_parts
+        and "common-query" in directory_parts
+        and expected_plan in directory_parts
+        and directory_parts.index("normalization") + 1 < len(directory_parts)
+        and directory_parts[directory_parts.index("normalization") + 1] == "v1"
+    )
+    legacy_path_ok = bool(
+        allow_legacy_common_migration
+        and common_identity
+        and legacy_tree_ok
+        and manifest.get("schema") == LEGACY_QUERY_CHECKPOINT_SCHEMA
+        and isinstance(legacy_locator, str)
+        and re.fullmatch(
+            rf"/(?:content|tmp)/genome-evidence-resources-[^/]+/common/"
+            rf"{assembly.lower()}/dbSnp155Common\.bb",
+            legacy_locator,
+        )
+    )
     if (
-        manifest.get("schema") != QUERY_CHECKPOINT_SCHEMA
+        not (stable_matches or legacy_remote_matches or legacy_path_ok)
         or manifest.get("identifiers_sha256") != identifiers_sha256
         or manifest.get("identifier_count") != len(identifiers)
         or manifest.get("assembly") != assembly
         or manifest.get("dbsnp_build") != DBSNP_BUILD
-        or manifest.get("canonical_url") != canonical_url
         or manifest.get("tool_sha256") != tool_sha256
         or not output.is_file()
         or output.is_symlink()
@@ -759,6 +833,26 @@ def _valid_query_checkpoint(
         row.marker_id not in requested for row in rows
     ):
         return None
+    if legacy_path_ok:
+        migrated = {
+            key: value
+            for key, value in manifest.items()
+            if key not in {"canonical_url", "endpoint_used"}
+        }
+        migrated.update(
+            {
+                "schema": QUERY_CHECKPOINT_SCHEMA,
+                "resource_identity": resource_identity.as_dict(),
+                "endpoint_kind": "local-common-bigbed",
+            }
+        )
+        _json(manifest_path, migrated)
+        if reporter is not None:
+            reporter.info(
+                "dbsnp.batch.migrated",
+                "Migrated and reused a verified legacy common-query checkpoint.",
+                identifier_count=len(identifiers),
+            )
     return output
 
 
@@ -789,6 +883,46 @@ def _validate_query_output(path: Path, identifiers: Sequence[str]) -> tuple[BigB
             "returned-identifier-outside-batch", returned_record_count=len(rows)
         )
     return rows
+
+
+def _valid_indeterminate_checkpoint(
+    directory: Path,
+    *,
+    resource_identity: QueryResourceIdentity,
+    assembly: str,
+    tool_sha256: str,
+    identifiers_sha256: str,
+    identifier_count: int,
+    split_depth: int,
+) -> bool:
+    path = directory / "INDETERMINATE.json"
+    if path.is_symlink():
+        return False
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return False
+    return bool(
+        manifest.get("schema") == QUERY_INDETERMINATE_SCHEMA
+        and manifest.get("resource_identity") == resource_identity.as_dict()
+        and manifest.get("assembly") == assembly
+        and manifest.get("dbsnp_build") == DBSNP_BUILD
+        and manifest.get("tool_sha256") == tool_sha256
+        and manifest.get("identifiers_sha256") == identifiers_sha256
+        and manifest.get("identifier_count") == identifier_count
+        and manifest.get("split_depth") == split_depth
+        and manifest.get("validation_category")
+        in {
+            "output-missing",
+            "encoding-invalid",
+            "output-io-invalid",
+            "coordinate-invalid",
+            "allele-count-incoherent",
+            "row-schema-invalid",
+            "returned-identifier-outside-batch",
+        }
+        and manifest.get("disposition") == "authoritative_full_fallback_required"
+    )
 
 
 def _publish_checkpoint_file(source: Path, destination: Path) -> None:
@@ -891,16 +1025,39 @@ def _query_batch(
     worker_tmp: Path | None = None,
     allow_validation_indeterminate: bool = False,
     indeterminate: list[tuple[str, ...]] | None = None,
+    resource_identity: QueryResourceIdentity | None = None,
 ) -> Path | None:
+    resource_identity = resource_identity or _remote_query_identity(assembly, urls[0])
     payload = "\n".join(identifiers) + "\n"
     identifiers_sha256 = sha256(payload.encode("ascii")).hexdigest()
+    if allow_validation_indeterminate and _valid_indeterminate_checkpoint(
+        directory,
+        resource_identity=resource_identity,
+        assembly=assembly,
+        tool_sha256=tool_sha256,
+        identifiers_sha256=identifiers_sha256,
+        identifier_count=len(identifiers),
+        split_depth=split_depth,
+    ):
+        if indeterminate is None:
+            raise RuntimeError("common indeterminate accumulator is missing")
+        indeterminate.append(tuple(identifiers))
+        reporter.info(
+            "dbsnp.common.leaf.resume",
+            "Reused a verified common-indeterminate disposition for full fallback.",
+            identifier_count=len(identifiers),
+            split_depth=split_depth,
+        )
+        return None
     completed = _valid_query_checkpoint(
         directory,
         identifiers=identifiers,
         identifiers_sha256=identifiers_sha256,
         assembly=assembly,
-        canonical_url=urls[0],
+        resource_identity=resource_identity,
         tool_sha256=tool_sha256,
+        allow_legacy_common_migration=allow_validation_indeterminate,
+        reporter=reporter,
     )
     if completed is not None:
         reporter.info(
@@ -930,7 +1087,7 @@ def _query_batch(
             split_manifest.get("schema") == QUERY_SPLIT_SCHEMA
             and split_manifest.get("assembly") == assembly
             and split_manifest.get("dbsnp_build") == DBSNP_BUILD
-            and split_manifest.get("canonical_url") == urls[0]
+            and split_manifest.get("resource_identity") == resource_identity.as_dict()
             and split_manifest.get("tool_sha256") == tool_sha256
             and split_manifest.get("identifiers_sha256") == identifiers_sha256
             and split_manifest.get("identifier_count") == len(identifiers)
@@ -993,8 +1150,8 @@ def _query_batch(
                     "schema": QUERY_CHECKPOINT_SCHEMA,
                     "assembly": assembly,
                     "dbsnp_build": DBSNP_BUILD,
-                    "canonical_url": urls[0],
-                    "endpoint_used": endpoint,
+                    "resource_identity": resource_identity.as_dict(),
+                    "endpoint_kind": resource_identity.kind,
                     "tool_sha256": tool_sha256,
                     "identifiers_sha256": identifiers_sha256,
                     "identifier_count": len(identifiers),
@@ -1060,7 +1217,7 @@ def _query_batch(
                     "schema": QUERY_SPLIT_SCHEMA,
                     "assembly": assembly,
                     "dbsnp_build": DBSNP_BUILD,
-                    "canonical_url": urls[0],
+                    "resource_identity": resource_identity.as_dict(),
                     "tool_sha256": tool_sha256,
                     "identifiers_sha256": identifiers_sha256,
                     "identifier_count": len(identifiers),
@@ -1093,6 +1250,7 @@ def _query_batch(
                 worker_tmp=worker_tmp,
                 allow_validation_indeterminate=allow_validation_indeterminate,
                 indeterminate=indeterminate,
+                resource_identity=resource_identity,
             ),
             _query_batch(
                 tool,
@@ -1111,6 +1269,7 @@ def _query_batch(
                 worker_tmp=worker_tmp,
                 allow_validation_indeterminate=allow_validation_indeterminate,
                 indeterminate=indeterminate,
+                resource_identity=resource_identity,
             ),
         )
         available_children = tuple(child for child in children if child is not None)
@@ -1136,8 +1295,8 @@ def _query_batch(
                 "schema": QUERY_CHECKPOINT_SCHEMA,
                 "assembly": assembly,
                 "dbsnp_build": DBSNP_BUILD,
-                "canonical_url": urls[0],
-                "endpoint_used": "adaptive-split",
+                "resource_identity": resource_identity.as_dict(),
+                "endpoint_kind": "adaptive-split",
                 "tool_sha256": tool_sha256,
                 "identifiers_sha256": identifiers_sha256,
                 "identifier_count": len(identifiers),
@@ -1152,6 +1311,21 @@ def _query_batch(
             if indeterminate is None:
                 raise RuntimeError("common indeterminate accumulator is missing")
             indeterminate.append(tuple(identifiers))
+            _json(
+                directory / "INDETERMINATE.json",
+                {
+                    "schema": QUERY_INDETERMINATE_SCHEMA,
+                    "resource_identity": resource_identity.as_dict(),
+                    "assembly": assembly,
+                    "dbsnp_build": DBSNP_BUILD,
+                    "tool_sha256": tool_sha256,
+                    "identifiers_sha256": identifiers_sha256,
+                    "identifier_count": len(identifiers),
+                    "validation_category": deterministic_rejection.category,
+                    "split_depth": split_depth,
+                    "disposition": "authoritative_full_fallback_required",
+                },
+            )
             reporter.warning(
                 "dbsnp.common.leaf-indeterminate",
                 "A minimum common-query leaf was routed to authoritative full fallback.",
@@ -1198,7 +1372,7 @@ def _query_bigbed_in_batches(
         identifiers=identifiers,
         identifiers_sha256=all_sha256,
         assembly=assembly,
-        canonical_url=urls[0],
+        resource_identity=_remote_query_identity(assembly, urls[0]),
         tool_sha256=tool_sha256,
     )
     if combined is not None:
@@ -1232,7 +1406,7 @@ def _query_bigbed_in_batches(
             identifiers=batch,
             identifiers_sha256=sha256(batch_payload.encode("ascii")).hexdigest(),
             assembly=assembly,
-            canonical_url=urls[0],
+            resource_identity=_remote_query_identity(assembly, urls[0]),
             tool_sha256=tool_sha256,
         )
         batch_specs.append((index, batch, batch_directory, valid))
@@ -1332,7 +1506,7 @@ def _query_bigbed_in_batches(
             "schema": QUERY_CHECKPOINT_SCHEMA,
             "assembly": assembly,
             "dbsnp_build": DBSNP_BUILD,
-            "canonical_url": urls[0],
+            "resource_identity": _remote_query_identity(assembly, urls[0]).as_dict(),
             "endpoint_used": "batched-primary",
             "tool_sha256": tool_sha256,
             "identifiers_sha256": all_sha256,
@@ -1371,6 +1545,7 @@ def _query_common_batches(
     tool: Path,
     tool_sha256: str,
     local_common: Path,
+    resource_identity: QueryResourceIdentity,
     assembly: str,
     identifiers: Sequence[str],
     checkpoint_root: Path,
@@ -1388,25 +1563,62 @@ def _query_common_batches(
     outputs: list[Path] = []
     indeterminate_leaves: list[tuple[str, ...]] = []
     started_at = time.monotonic()
-    total_batches = (len(identifiers) + batch_size - 1) // batch_size
+    batches = [
+        identifiers[index : index + batch_size] for index in range(0, len(identifiers), batch_size)
+    ]
+    total_batches = len(batches)
     progress_event = f"dbsnp.{label}.progress"
+    batch_specs: list[tuple[int, Sequence[str], Path, Path | None]] = []
+    for index, batch in enumerate(batches):
+        payload = "\n".join(batch) + "\n"
+        digest = sha256(payload.encode("ascii")).hexdigest()
+        directory = checkpoint_root / label / "batches" / f"{index:05d}-{digest[:12]}"
+        valid = _valid_query_checkpoint(
+            directory,
+            identifiers=batch,
+            identifiers_sha256=digest,
+            assembly=assembly,
+            resource_identity=resource_identity,
+            tool_sha256=tool_sha256,
+            allow_legacy_common_migration=True,
+            reporter=reporter,
+        )
+        batch_specs.append((index, batch, directory, valid))
+    resumed_identifiers = sum(len(batch) for _, batch, _, valid in batch_specs if valid)
+    resumed_batches = sum(valid is not None for *_, valid in batch_specs)
+    if resumed_batches:
+        reporter.info(
+            f"dbsnp.{label}.checkpoints",
+            f"{assembly} common checkpoints: {resumed_batches}/{total_batches} batches verified",
+            resumed_batches=resumed_batches,
+            total_batches=total_batches,
+            resumed_identifiers=resumed_identifiers,
+        )
     reporter.progress(
         progress_event,
         label.replace("-", " "),
-        0,
+        resumed_identifiers,
         len(identifiers),
         unit="IDs",
         started_at=started_at,
         force=True,
-        completed_batches=0,
+        initial_completed=resumed_identifiers,
+        completed_batches=resumed_batches,
         total_batches=total_batches,
         indeterminate_leaf_count=0,
     )
-    for index, start in enumerate(range(0, len(identifiers), batch_size)):
-        batch = identifiers[start : start + batch_size]
-        payload = "\n".join(batch) + "\n"
-        digest = sha256(payload.encode("ascii")).hexdigest()
-        directory = checkpoint_root / label / "batches" / f"{index:05d}-{digest[:12]}"
+    reporter.workflow_progress(
+        f"{assembly.lower()}_common",
+        resumed_identifiers / len(identifiers) if identifiers else 1.0,
+        force=True,
+        resumed_identifiers=resumed_identifiers,
+    )
+    completed_identifiers = resumed_identifiers
+    completed_batches = resumed_batches
+    for _index, batch, directory, valid in batch_specs:
+        if valid is not None:
+            outputs.append(valid)
+            continue
         output = _query_batch(
             tool,
             tool_sha256,
@@ -1422,23 +1634,34 @@ def _query_common_batches(
             sleep=sleep,
             allow_validation_indeterminate=True,
             indeterminate=indeterminate_leaves,
+            resource_identity=resource_identity,
         )
         if output is not None:
             outputs.append(output)
         # A top-level batch is disposition-complete whether it returned no rows, resumed,
         # split into children, or ended in validation-indeterminate leaves. Child work must
         # never change this top-level denominator.
+        completed_identifiers += len(batch)
+        completed_batches += 1
         reporter.progress(
             progress_event,
             label.replace("-", " "),
-            start + len(batch),
+            completed_identifiers,
             len(identifiers),
             unit="IDs",
             started_at=started_at,
             force=True,
-            completed_batches=index + 1,
+            initial_completed=resumed_identifiers,
+            completed_batches=completed_batches,
             total_batches=total_batches,
             indeterminate_leaf_count=len(indeterminate_leaves),
+        )
+        reporter.workflow_progress(
+            f"{assembly.lower()}_common",
+            completed_identifiers / len(identifiers) if identifiers else 1.0,
+            force=True,
+            completed_batches=completed_batches,
+            total_batches=total_batches,
         )
     indeterminate_set = {value for leaf in indeterminate_leaves for value in leaf}
     covered = tuple(value for value in identifiers if value not in indeterminate_set)
@@ -1526,11 +1749,24 @@ def _query_common_first(
         common_manifest = {"status": "unavailable", "canonical_url": DBSNP_COMMON_URLS[assembly]}
     else:
         reporter.workflow_progress(f"{prefix}_cache", 1.0, status="complete", force=True)
-        reporter.workflow_progress(f"{prefix}_common", 0.0, force=True)
+        common_sha256 = common_manifest.get("sha256")
+        common_byte_size = common_manifest.get("byte_size")
+        if not isinstance(common_sha256, str) or not isinstance(common_byte_size, int):
+            raise RuntimeError("validated common cache identity is incomplete")
+        common_identity = QueryResourceIdentity(
+            QUERY_RESOURCE_IDENTITY_SCHEMA,
+            "local-common-bigbed",
+            assembly,
+            DBSNP_BUILD,
+            DBSNP_COMMON_URLS[assembly],
+            common_sha256,
+            common_byte_size,
+        )
         common_result = _query_common_batches(
             tool,
             tool_sha256,
             local_common,
+            common_identity,
             assembly,
             identifiers,
             checkpoint_root / "common-query",
@@ -1581,7 +1817,7 @@ def _query_common_first(
             identifiers=batch,
             identifiers_sha256=batch_digest,
             assembly=assembly,
-            canonical_url=DBSNP_URLS[assembly],
+            resource_identity=_remote_query_identity(assembly, DBSNP_URLS[assembly]),
             tool_sha256=tool_sha256,
         )
         if valid is not None:

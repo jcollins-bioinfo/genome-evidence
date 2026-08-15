@@ -1,4 +1,5 @@
 import io
+import json
 import threading
 from email.message import Message
 from pathlib import Path
@@ -75,3 +76,70 @@ def test_segmented_download_reconstructs_with_bounded_overlap(
     assert manifest["byte_size"] == len(payload)
     assert destination.with_name("synthetic.bb.COMPLETED.json").is_file()
     assert "rs987654321" not in reporter.log_path.read_text(encoding="utf-8")
+
+
+def test_completed_download_reuse_does_not_probe_mutable_remote_headers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    url = "https://example.invalid/pinned-common.bb"
+    destination = tmp_path / "common.bb"
+    destination.write_bytes(b"immutable synthetic object")
+    completion = destination.with_name(destination.name + ".COMPLETED.json")
+    from hashlib import sha256
+
+    completion.write_text(
+        json.dumps(
+            {
+                "schema": "genome-evidence-segmented-download/v1",
+                "requested_url": url,
+                "remote_identity": {
+                    "canonical_url": "https://old-cdn.invalid/common.bb",
+                    "total_bytes": destination.stat().st_size,
+                    "etag": '"old"',
+                    "last_modified": "yesterday",
+                },
+                "byte_size": destination.stat().st_size,
+                "sha256": sha256(destination.read_bytes()).hexdigest(),
+                "segment_count": 3,
+            }
+        )
+    )
+
+    monkeypatch.setattr(
+        "genome_evidence.workspace.segmented_download.remote_identity",
+        lambda *_args, **_kwargs: pytest.fail("completed immutable cache must not contact origin"),
+    )
+    result, _manifest = segmented_download(
+        url,
+        destination,
+        ProvisioningReporter(tmp_path / "events.jsonl", stream=io.StringIO()),
+    )
+
+    assert result == destination
+
+
+def test_completed_download_checksum_mismatch_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    destination = tmp_path / "common.bb"
+    destination.write_bytes(b"corrupt")
+    destination.with_name(destination.name + ".COMPLETED.json").write_text(
+        json.dumps(
+            {
+                "schema": "genome-evidence-segmented-download/v1",
+                "requested_url": "https://example.invalid/common.bb",
+                "byte_size": 7,
+                "sha256": "0" * 64,
+            }
+        )
+    )
+    monkeypatch.setattr(
+        "genome_evidence.workspace.segmented_download.remote_identity",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("synthetic origin unavailable")),
+    )
+    with pytest.raises(OSError, match="origin unavailable"):
+        segmented_download(
+            "https://example.invalid/common.bb",
+            destination,
+            ProvisioningReporter(tmp_path / "events.jsonl", stream=io.StringIO()),
+        )
