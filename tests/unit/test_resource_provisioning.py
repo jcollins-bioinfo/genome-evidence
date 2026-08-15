@@ -3,7 +3,7 @@ import io
 import json
 import subprocess
 import threading
-from hashlib import md5
+from hashlib import md5, sha256
 from pathlib import Path
 
 import pytest
@@ -203,6 +203,181 @@ def test_query_batch_does_not_retry_deterministically_rejected_output(tmp_path: 
     assert calls == 1
     assert '"validation_category": "row-schema-invalid"' in reporter.log_path.read_text()
     assert "rs1" not in reporter.log_path.read_text()
+
+
+def _common_identity(content: bytes = b"common-v1") -> resource_module.QueryResourceIdentity:
+    return resource_module.QueryResourceIdentity(
+        resource_module.QUERY_RESOURCE_IDENTITY_SCHEMA,
+        "local-common-bigbed",
+        "GRCh37",
+        resource_module.DBSNP_BUILD,
+        resource_module.DBSNP_COMMON_URLS["GRCh37"],
+        sha256(content).hexdigest(),
+        len(content),
+    )
+
+
+def test_common_checkpoint_identity_ignores_ephemeral_execution_path(tmp_path: Path) -> None:
+    tool = tmp_path / "bigBedNamedItems"
+    tool.write_bytes(b"synthetic")
+    reporter = ProvisioningReporter(tmp_path / "events.jsonl", stream=io.StringIO())
+    calls = 0
+
+    def runner(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        calls += 1
+        Path(args[-1]).write_text("")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    for runtime in ("runtime-one", "runtime-two"):
+        resource_module._query_batch(  # noqa: SLF001
+            tool,
+            "a" * 64,
+            (f"/content/genome-evidence-resources-{runtime}/common/grch37/dbSnp155Common.bb",),
+            "GRCh37",
+            ("rs1",),
+            tmp_path / "checkpoint",
+            tmp_path / runtime,
+            runner,
+            reporter,
+            attempts=1,
+            timeout_seconds=60,
+            sleep=lambda _seconds: None,
+            allow_validation_indeterminate=True,
+            indeterminate=[],
+            resource_identity=_common_identity(),
+        )
+
+    assert calls == 1
+    manifest = json.loads((tmp_path / "checkpoint/COMPLETED.json").read_text())
+    assert manifest["resource_identity"] == _common_identity().as_dict()
+    assert "/content" not in json.dumps(manifest)
+
+
+def test_changed_common_content_invalidates_query_checkpoint(tmp_path: Path) -> None:
+    tool = tmp_path / "bigBedNamedItems"
+    tool.write_bytes(b"synthetic")
+    calls = 0
+
+    def runner(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        calls += 1
+        Path(args[-1]).write_text("")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    for content in (b"common-v1", b"common-v2"):
+        resource_module._query_batch(  # noqa: SLF001
+            tool,
+            "a" * 64,
+            ("/tmp/execution.bb",),
+            "GRCh37",
+            ("rs1",),
+            tmp_path / "checkpoint",
+            tmp_path / "work",
+            runner,
+            ProvisioningReporter(tmp_path / f"{calls}.jsonl", stream=io.StringIO()),
+            attempts=1,
+            timeout_seconds=60,
+            sleep=lambda _seconds: None,
+            resource_identity=_common_identity(content),
+        )
+    assert calls == 2
+
+
+def test_legacy_common_checkpoint_is_narrowly_migrated(tmp_path: Path) -> None:
+    directory = (
+        tmp_path / "cache/downloads/normalization/v1/source-bound/dbsnp/common-query/"
+        "grch37-common/batches/00000-synthetic"
+    )
+    directory.mkdir(parents=True)
+    output = directory / "records.bed"
+    output.write_text("")
+    payload_digest = sha256(b"rs1\n").hexdigest()
+    (directory / "COMPLETED.json").write_text(
+        json.dumps(
+            {
+                "schema": resource_module.LEGACY_QUERY_CHECKPOINT_SCHEMA,
+                "assembly": "GRCh37",
+                "dbsnp_build": resource_module.DBSNP_BUILD,
+                "canonical_url": (
+                    "/content/genome-evidence-resources-old/common/grch37/dbSnp155Common.bb"
+                ),
+                "tool_sha256": "a" * 64,
+                "identifiers_sha256": payload_digest,
+                "identifier_count": 1,
+                "record_count": 0,
+                "sha256": sha256(b"").hexdigest(),
+                "byte_size": 0,
+            }
+        )
+    )
+    reporter = ProvisioningReporter(tmp_path / "events.jsonl", stream=io.StringIO())
+    result = resource_module._valid_query_checkpoint(  # noqa: SLF001
+        directory,
+        identifiers=("rs1",),
+        identifiers_sha256=payload_digest,
+        assembly="GRCh37",
+        resource_identity=_common_identity(),
+        tool_sha256="a" * 64,
+        allow_legacy_common_migration=True,
+        reporter=reporter,
+    )
+    assert result == output
+    assert json.loads((directory / "COMPLETED.json").read_text())["schema"].endswith("/v2")
+    assert "dbsnp.batch.migrated" in reporter.log_path.read_text()
+
+
+def test_common_indeterminate_leaf_persists_but_strict_full_does_not(tmp_path: Path) -> None:
+    tool = tmp_path / "bigBedNamedItems"
+    tool.write_bytes(b"synthetic")
+    calls = 0
+
+    def malformed(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        calls += 1
+        Path(args[-1]).write_text("malformed\n")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    for _ in range(2):
+        leaves: list[tuple[str, ...]] = []
+        assert (
+            resource_module._query_batch(  # noqa: SLF001
+                tool,
+                "a" * 64,
+                ("/tmp/common.bb",),
+                "GRCh37",
+                ("rs1",),
+                tmp_path / "checkpoint",
+                tmp_path / "work",
+                malformed,
+                ProvisioningReporter(tmp_path / "events.jsonl", stream=io.StringIO()),
+                attempts=1,
+                timeout_seconds=60,
+                sleep=lambda _seconds: None,
+                allow_validation_indeterminate=True,
+                indeterminate=leaves,
+                resource_identity=_common_identity(),
+            )
+            is None
+        )
+        assert leaves == [("rs1",)]
+    assert calls == 1
+    with pytest.raises(resource_module._OutputValidationInterruption):  # noqa: SLF001
+        resource_module._query_batch(  # noqa: SLF001
+            tool,
+            "a" * 64,
+            (resource_module.DBSNP_URLS["GRCh37"],),
+            "GRCh37",
+            ("rs1",),
+            tmp_path / "strict",
+            tmp_path / "work",
+            malformed,
+            ProvisioningReporter(tmp_path / "strict.jsonl", stream=io.StringIO()),
+            attempts=1,
+            timeout_seconds=60,
+            sleep=lambda _seconds: None,
+        )
+    assert not (tmp_path / "strict/INDETERMINATE.json").exists()
 
 
 def test_common_validation_failure_is_localized_to_leaf_and_missing_ids(

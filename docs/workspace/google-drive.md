@@ -44,6 +44,14 @@ The GRCh38 archive is fetched from UCSC's fixed `hg38.fa.gz` endpoint and must m
 
 The pinned Kent v479 `bigBedNamedItems` utility first queries local copies of the pinned hg19/hg38 `dbSnp155Common.bb` files. Durable, identity-bound range segments live below the private normalization checkpoint; a verified assembled copy is materialized in ephemeral `/content` for fast queries. The complete 65/68 GiB files are **never downloaded**. Only common-missing and common-indeterminate rsIDs are sent to their pinned remote indexes. Common-missing means a validated common query returned no row; common-indeterminate means a minimum query leaf could not be validated. Neither is authoritative dbSNP absence: both require a successfully completed full-index fallback. Genotype tokens are never written to query lists or transmitted.
 
+The local materialization path is only Kent's execution locator; it is not scientific
+identity. Query checkpoint v2 identity contains the assembly, dbSNP build, pinned source
+URL, verified common-file SHA-256 and byte size, Kent-tool SHA-256, identifier payload
+digest/count, and algorithm schema. Minimum common-indeterminate leaves have last-written
+`INDETERMINATE.json` dispositions with the same stable identity and no raw identifiers, so
+a restart routes them directly to authoritative fallback. Full-index failures never receive
+this disposition and remain fatal-but-resumable.
+
 Plan for roughly 3.6 GiB of additional Drive checkpoint space for both common files on a GRCh37 run, plus approximately 1.8 GiB per required local common copy while active. Before transfer, 00B reports Drive and local free space. Segment files are the durable copy; local assembled/query files are ephemeral. A temporary assembled durable file can coexist during validation, so retain headroom. Drive rename atomicity is not used as a commit boundary: each segment and final resource has a last-written, checksum-bound completion manifest.
 
 ### Progress telemetry
@@ -89,7 +97,15 @@ checksum-verified before reuse.
 
 Bounded network or workspace-I/O exhaustion becomes `ProvisioningIncomplete`; notebook
 00B prints `status: incomplete_resumable`, the durable log and checkpoint paths, and the
-instruction to rerun the cell. A rerun reconstructs the same run key, validates existing components, and continues at the first incomplete unit. Keep the checkpoint tree: compatible common downloads, common batches, split children, and full-query checkpoints remain reusable across this orchestration correction. Configuration conflicts,
+instruction to rerun the cell. Restart the runtime if necessary, then rerun the same cell
+without deleting or moving the checkpoint tree. The new runtime may use a different
+`/content/genome-evidence-resources-<random>` directory: stable content identity permits
+reuse. Known v1 common-query manifests are migrated only when their path has the exact
+workflow-owned temporary shape and every source-bound plan, tool/input, current common
+cache, output hash/size/parse, and returned-ID subset check succeeds. Legacy v1 did not
+record the common-file SHA directly; this deliberately narrow migration relies on the
+independently verified current pinned common cache and retained output. Arbitrary paths and
+ambiguous identities are rejected. Configuration conflicts,
 unexpected data, checksum mismatches, unsafe paths, or incompatible completed resources
 remain errors. Tolerance never means accepting corrupt or scientifically incomplete
 resources. Before a bundle completion marker exists, torn workflow-owned output files
@@ -113,6 +129,14 @@ process overhead.
 | `GENOME_EVIDENCE_COMMON_DOWNLOAD_SEGMENTS` | `8` | 1–12 | Concurrent HTTP ranges across common downloads |
 
 Each persistent fallback worker reuses only its own local `TMPDIR/udcCache`; caches are never shared. Retries remain bounded and jittered, and adaptive splitting preserves completed child checkpoints. Existing v1 batch manifests are validated against their input digest, assembly, URL, tool identity, output hash/size/count, and returned-ID subset before reuse. Invalid checkpoints are ignored without logging identifiers.
+
+For recovery of a large interrupted personal run, set
+`GENOME_EVIDENCE_DBSNP_WORKERS=2` before rerunning unless the environment has already been
+validated at a different bounded setting. A completed common BigBed is an immutable local
+object by default: 00B validates its pinned requested URL, size, and recomputed SHA-256 and
+does not contact the origin merely because ETag, Last-Modified, redirect host, or equivalent
+mutable metadata may have changed. Incomplete range transfers still require exact remote
+validators and `Content-Range`; incompatible segments are never mixed.
 
 The expected speedup is substantial but not guaranteed: local common hits avoid latency-bound random remote reads, while the remaining independent full queries overlap up to the configured bound. These factors are multiplicative in the ordinary performance sense, not mathematically exponential. Actual improvement depends on the common-hit fraction, UCSC/network behavior, and Colab storage throughput; telemetry reports measured rates and never invents byte rates for Kent sparse queries.
 

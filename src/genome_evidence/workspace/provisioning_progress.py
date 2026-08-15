@@ -1,5 +1,6 @@
 """Privacy-safe progress telemetry and resumable HTTP transfers for workspace provisioning."""
 
+import html
 import http.client
 import json
 import os
@@ -146,17 +147,23 @@ class ProvisioningReporter:
         if "IPython" not in sys.modules:
             return None
         try:
-            display = sys.modules["IPython.display"].display
+            display_module = sys.modules["IPython.display"]
+            display = display_module.display
+            html_value = display_module.HTML
         except (AttributeError, KeyError):
             return None
         handle: Any = None
 
         def sink(value: str) -> None:
             nonlocal handle
+            rendered = html_value(
+                '<pre style="margin:0;white-space:pre;font-family:monospace">'
+                f"{html.escape(value)}</pre>"
+            )
             if handle is None:
-                handle = display(value, display_id=True)
+                handle = display(rendered, display_id=True)
             else:
-                handle.update(value)
+                handle.update(rendered)
 
         return sink
 

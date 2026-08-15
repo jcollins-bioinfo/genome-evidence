@@ -222,6 +222,35 @@ def _hash(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _verify_completed_hash(path: Path, reporter: ProvisioningReporter) -> str:
+    digest = sha256()
+    total = path.stat().st_size
+    completed = 0
+    started = time.monotonic()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(MiB), b""):
+            digest.update(chunk)
+            completed += len(chunk)
+            reporter.progress(
+                "common.download.verify",
+                "Verifying completed common cache",
+                completed,
+                total,
+                unit="bytes",
+                started_at=started,
+            )
+    reporter.progress(
+        "common.download.verify",
+        "Verifying completed common cache",
+        completed,
+        total,
+        unit="bytes",
+        started_at=started,
+        force=True,
+    )
+    return digest.hexdigest()
+
+
 def segmented_download(
     url: str,
     destination: Path,
@@ -240,18 +269,24 @@ def segmented_download(
     """Download ranges concurrently, assemble locally, validate, then commit a manifest last."""
     if not 1 <= concurrency <= 12:
         raise ValueError("segment concurrency must be between 1 and 12")
-    identity = identity or remote_identity(url, timeout_seconds=timeout_seconds)
     completion_path = destination.with_name(destination.name + ".COMPLETED.json")
-    if destination.is_file() and completion_path.is_file():
+    if identity is None and destination.is_file() and completion_path.is_file():
         try:
             installed = json.loads(completion_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError, json.JSONDecodeError):
             installed = {}
+        stored_remote = installed.get("remote_identity")
+        pinned_url_matches = installed.get("requested_url") == url or (
+            installed.get("requested_url") is None
+            and isinstance(stored_remote, dict)
+            and stored_remote.get("canonical_url") == url
+        )
         if (
             installed.get("schema") == "genome-evidence-segmented-download/v1"
-            and installed.get("remote_identity") == asdict(identity)
-            and installed.get("byte_size") == identity.total_bytes
-            and installed.get("sha256") == _hash(destination)
+            and pinned_url_matches
+            and isinstance(installed.get("byte_size"), int)
+            and destination.stat().st_size == installed.get("byte_size")
+            and installed.get("sha256") == _verify_completed_hash(destination, reporter)
         ):
             reporter.success(
                 "common.download.reuse",
@@ -260,9 +295,10 @@ def segmented_download(
                 reused_complete_segments=installed.get("segment_count", 0),
                 session_downloaded_bytes=0,
                 final_file_verification=True,
-                byte_size=identity.total_bytes,
+                byte_size=installed["byte_size"],
             )
             return destination, installed
+    identity = identity or remote_identity(url, timeout_seconds=timeout_seconds)
     directory = destination.with_name(destination.name + ".segments")
     directory.mkdir(parents=True, exist_ok=True)
     ranges = [
@@ -369,6 +405,7 @@ def segmented_download(
         validate(destination)
     manifest = {
         "schema": "genome-evidence-segmented-download/v1",
+        "requested_url": url,
         "remote_identity": asdict(identity),
         "sha256": _hash(destination),
         "byte_size": destination.stat().st_size,
