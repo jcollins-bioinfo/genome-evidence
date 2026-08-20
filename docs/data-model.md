@@ -45,3 +45,14 @@ locus, named-allele definition/haplotype evidence, locus constraint, function
 assertion, candidate diplotype, phenotype rule/evidence, and guideline evidence.
 Schemas are `genome-evidence-pgx-bundle/v1`, `genome-evidence-m8-run/v1`, and
 `genome-evidence-m8-completion/v1`; they do not track package versions.
+
+## M9 records
+
+`genome-evidence-pedigree/v1` contains pseudonymous members, explicit completed-M2
+bindings, and provenance-bearing directed parent assertions. M9 emits subject-input
+lineage, site/child segregation records with independent compatibility/informativeness/
+transmission axes, distinct allele assignments, aggregate QC, a checksummed manifest,
+and a last-written completion marker. Stable evidence IDs derive from scientific input
+identities; the deterministic run ID is distinct from package, schema, milestone, and
+algorithm versions. Exact definitions and denominators are documented in the
+[M9 family-analysis contract](family-analysis/segregation-and-transmission.md).

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.0 - Unreleased
+
+- Add the M9 declared-pedigree schema, structural validation, checksum-bound completed-M2 subject inputs, exact canonical family alignment, explicit Mendelian transmission enumeration, private atomic artifacts, aggregate-only CLI, notebook 08, and scientific/privacy documentation.
+- Keep missing, conflicting, unsupported, and inferred evidence out of ordinary autosomal diploid compatibility; relationship assertions are not relatedness verification, and site transmission is not long-range phase.
+
 ## 0.5.0 - Unreleased
 
 - Make `bounded_local_v1` the default normalization provisioning policy, add local ClinVar supplementation, explicit unresolved artifacts, an 80% source-placement guard, and policy-bound provenance/selectors.

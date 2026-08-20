@@ -9,7 +9,7 @@
 - **M6 — Phasing/imputation (incomplete infrastructure):** workspace, exact-input/reference/tool contracts, and offline adapter are implemented; mandatory real-Beagle imputation smoke and completed-result publication remain incomplete. No production resources ship.
 - **M7 — Polygenic scoring (implemented foundation):** versioned models and portability limitations.
 - **M8 — Pharmacogenomics (implemented foundation):** strict local evidence bundles and conservative star-allele candidates; no production bundle, structural calling, clinical validation, or recommendations.
-- **M9 — Family-aware analysis:** relationships, segregation, and inheritance evidence.
+- **M9 — Family-aware analysis (implemented foundation):** declared pedigree assertions, checksum-bound observed M2 inputs, and conservative site-level segregation/transmission evidence; no relatedness verification, de novo calling, long-range phase, or clinical interpretation.
 - **M10 — Phenotype integration:** measured and reported phenotype inputs.
 - **M11 — Hypothesis engine:** structured hypotheses and unresolved questions.
 - **M12 — Value-of-information:** prioritize confirmatory measurements and missing evidence.

@@ -11,6 +11,7 @@ from genome_evidence.evidence import (
     ingest_clinvar_vcv,
     link_external_evidence,
 )
+from genome_evidence.family_analysis import analyze_family, load_pedigree
 from genome_evidence.ingest import Ingest23andMeConfig, ParseMode, ingest_23andme
 from genome_evidence.ingest.errors import GenotypeParseError
 from genome_evidence.normalization import NormalizationConfig, normalize_m1_run
@@ -73,6 +74,46 @@ pgx_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(pgx_app, name="pgx")
+family_app = typer.Typer(
+    help="Validate declared pedigrees and compute site-level family evidence.",
+    no_args_is_help=True,
+)
+app.add_typer(family_app, name="family")
+
+
+@family_app.command("validate-pedigree")
+def family_validate_pedigree(
+    pedigree: Annotated[Path, typer.Option("--pedigree", exists=True, dir_okay=False)],
+) -> None:
+    """Validate structure without printing family identifiers or relationships."""
+    try:
+        descriptor = load_pedigree(pedigree)
+    except (ValueError, OSError) as error:
+        typer.echo(f"Pedigree validation failed: {error}", err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo(
+        f"Pedigree valid: members={len(descriptor.members)}; "
+        f"declared_relationships={len(descriptor.relationships)}"
+    )
+
+
+@family_app.command("analyze")
+def family_analyze(
+    pedigree: Annotated[Path, typer.Option("--pedigree", exists=True, dir_okay=False)],
+    output: Annotated[Path, typer.Option("--output", file_okay=False)],
+) -> None:
+    """Publish private conditional segregation and site-transmission evidence."""
+    try:
+        result = analyze_family(pedigree, output)
+    except (ValueError, FileExistsError, OSError) as error:
+        typer.echo(f"Family analysis failed: {error}", err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo(f"Evidence rows: {result.evidence_count}")
+    typer.echo(
+        "Compatibility: "
+        + ", ".join(f"{key}={value}" for key, value in result.compatibility_counts.items())
+    )
+    typer.echo("Family analysis completed; inspect the private output directory")
 
 
 @pgx_app.command("validate-bundle")
