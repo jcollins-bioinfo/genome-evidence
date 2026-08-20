@@ -6,9 +6,9 @@ Genome Evidence is early-stage, reproducible, provenance-first personal-genomics
 
 An observation is not an inference; a canonical allele is not a source observation; an external assertion is not project truth; a model candidate is not a clinical result. Missing means unknown or unassayed—never reference. Keep all personal genomic, phenotype, medication, clinical, and derived data outside this repository and offline where possible. Colab runs on a Google-managed VM. See the [epistemic contract](docs/epistemic-contract.md) and [privacy guidance](docs/privacy.md).
 
-## Status through M8
+## Status through M9
 
-M1 ingestion, M2 canonical normalization, M3 external evidence, M4 transparent review prioritization, M5 population projection foundations, M7 polygenic-score foundations, and M8 pharmacogenomic evidence foundations are implemented with synthetic tests. M6 remains gated: its infrastructure exists, but the required real-Beagle fabricated-panel smoke has not established completed real-engine support. No production population, imputation, PGS, or PGx reference bundle ships.
+M1 ingestion, M2 canonical normalization, M3 external evidence, M4 transparent review prioritization, M5 population projection foundations, M7 polygenic-score foundations, M8 pharmacogenomic evidence, and M9 declared-pedigree segregation foundations are implemented with synthetic tests. M6 remains gated: its infrastructure exists, but the required real-Beagle fabricated-panel smoke has not established completed real-engine support. No production population, imputation, PGS, or PGx reference bundle ships.
 
 M8 validates strict local bundles and enumerates conservative candidates from exact M2 **observed** GRCh38 genotypes. Sparse consumer arrays are not complete pharmacogene assays. Missing positions never default to `*1`; ambiguity is retained. CYP2D6, CNV/SV/hybrids, HLA, mitochondrial, sex-chromosome, special-algorithm, and unsupported-ploidy calling fail closed. M8 produces no clinical validation, medication selection, dose, safety label, actionability claim, or recommendation.
 
@@ -23,18 +23,27 @@ uv run genome-evidence doctor
 uv run genome-evidence --help
 ```
 
-Selected command groups include `ingest`, `normalize`, `evidence`, `prioritize`, `ancestry`, `phasing`, `pgs`, `pgx`, and `workspace`. PGx analysis is offline and requires explicit genes:
+Selected command groups include `ingest`, `normalize`, `evidence`, `prioritize`, `ancestry`, `phasing`, `pgs`, `pgx`, `family`, and `workspace`. PGx analysis is offline and requires explicit genes:
 
 ```bash
 uv run genome-evidence pgx validate-bundle --bundle /references/pgx-bundle
 uv run genome-evidence pgx infer --normalization-run /private/m2-run --bundle /references/pgx-bundle --output /private/m8-run --gene FAKE1
 ```
 
-These commands report aggregate status only. Use the public Python APIs `validate_pharmacogenomics_bundle(...)` and `infer_pharmacogenomics(...)` for the same checked workflow.
+M9 validates a local declared pedigree and analyzes only checksum-valid completed M2 observations:
+
+```bash
+uv run genome-evidence family validate-pedigree --pedigree /private/pedigree.json
+uv run genome-evidence family analyze --pedigree /private/pedigree.json --output /private/m9-run
+```
+
+Relationships remain declared assertions; outputs are conditional site-level compatibility and transmission evidence, never relatedness verification, de novo calls, long-range phase, or clinical conclusions. Missing/conflicting calls remain unresolved, M6 inference is excluded, and unsupported biology fails closed. See the [M9 contract](docs/family-analysis/segregation-and-transmission.md).
+
+These commands report aggregate status only. Use the public Python APIs `load_pedigree(...)`, `validate_pedigree(...)`, and `analyze_family(...)` for M9, and `validate_pharmacogenomics_bundle(...)` / `infer_pharmacogenomics(...)` for M8.
 
 ## Private workspace and artifacts
 
-`genome-evidence workspace init` creates a provider-neutral, non-destructive tree. Durable PGx bundles belong under `references/pharmacogenomics/`, evictable source caches under `cache/{clinpgx,pharmvar,pharmcat}/`, and private M8 outputs under `runs/m8_pharmacogenomics/`. The canonical Colab location remains `/content/drive/MyDrive/genome-evidence-private`; local/offline roots are supported and preferred for privacy-sensitive work.
+`genome-evidence workspace init` creates a provider-neutral, non-destructive tree. Durable PGx bundles belong under `references/pharmacogenomics/`, evictable source caches under `cache/{clinpgx,pharmvar,pharmcat}/`, and private M8 outputs under `runs/m8_pharmacogenomics/`, and private pedigree/M9 artifacts under `inputs/families/` and `runs/m9_family_analysis/`. The canonical Colab location remains `/content/drive/MyDrive/genome-evidence-private`; local/offline roots are supported and preferred for privacy-sensitive work.
 
 Notebook 00B provisions the production normalization resources required by the source imported in notebook 00. Its default `bounded_local_v1` policy downloads the pinned ~1.8 GiB Common and ~75 MiB ClinVar BigBeds for each required assembly with resumable ranges, queries verified local `/content` copies, and asks ClinVar only for Common-unresolved rsIDs. Query checkpoints are bound to pinned URLs and verified content, never disposable local paths; compatible legacy Common checkpoints are narrowly migrated. It neither contacts nor downloads the 65/68 GiB complete BigBeds and never transmits genotype calls. Residual unresolved coverage is recorded privately and publication fails closed only below the explicit 80% exact-source-placement sanity threshold. It verifies UCSC's GRCh38 FASTA checksum, builds the FAI and any conservative variant-specific GRCh37→GRCh38 map, and publishes provenance plus durable selectors last. Notebook 01 consumes that selection, computes ephemerally, and publishes re-hashed M1/M2 runs.
 
@@ -59,7 +68,7 @@ Every stage creates immutable, checksummed artifacts with source/input identitie
 
 ## Notebooks
 
-The [canonical notebook index](notebooks/README.md) lists all nine notebooks exactly once. A badge only opens a notebook; it does not auto-run, mount Drive, grant access, create folders, or reproduce the lockfile environment.
+The [canonical notebook index](notebooks/README.md) lists all ten notebooks exactly once. A badge only opens a notebook; it does not auto-run, mount Drive, grant access, create folders, or reproduce the lockfile environment.
 
 - [00 initialize private workspace](notebooks/00_initialize_private_workspace.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jcollins-bioinfo/genome-evidence/blob/main/notebooks/00_initialize_private_workspace.ipynb)
 - [00B provision normalization resources](notebooks/00b_provision_normalization_resources.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jcollins-bioinfo/genome-evidence/blob/main/notebooks/00b_provision_normalization_resources.ipynb)
@@ -70,10 +79,11 @@ The [canonical notebook index](notebooks/README.md) lists all nine notebooks exa
 - [05 reference-panel phasing and imputation](notebooks/05_reference_panel_phasing_and_imputation.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jcollins-bioinfo/genome-evidence/blob/main/notebooks/05_reference_panel_phasing_and_imputation.ipynb)
 - [06 versioned polygenic-score calculation](notebooks/06_polygenic_score_calculation.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jcollins-bioinfo/genome-evidence/blob/main/notebooks/06_polygenic_score_calculation.ipynb)
 - [07 pharmacogenomic candidate evidence](notebooks/07_pharmacogenomics_evidence.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jcollins-bioinfo/genome-evidence/blob/main/notebooks/07_pharmacogenomics_evidence.ipynb)
+- [08 family segregation and transmission](notebooks/08_family_segregation_and_transmission.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jcollins-bioinfo/genome-evidence/blob/main/notebooks/08_family_segregation_and_transmission.ipynb)
 
 ## Development, versioning, and roadmap
 
-The package is pre-1.0 (`0.5.0` prepared): public APIs and schemas may evolve only under the documented compatibility/deprecation policy. This architectural update versions the selector and provenance schemas while retaining an explicit compatibility path for legacy selectors and immutable bundles. It does not tag, publish, sign, or create a release. Follow the [roadmap](docs/roadmap.md), ADRs, documentation expectations in `AGENTS.md`, and MIT [license](LICENSE).
+The package is pre-1.0 (`0.6.0` prepared): public APIs and schemas may evolve only under the documented compatibility/deprecation policy. This architectural update versions the selector and provenance schemas while retaining an explicit compatibility path for legacy selectors and immutable bundles. It does not tag, publish, sign, or create a release. Follow the [roadmap](docs/roadmap.md), ADRs, documentation expectations in `AGENTS.md`, and MIT [license](LICENSE).
 
 CI runs these locked gates:
 

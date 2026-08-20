@@ -73,3 +73,13 @@ unphased ambiguity remains explicit. Candidates are not confirmed clinical genot
 phenotype evidence is not a treatment instruction, and no medication or dose
 recommendation is generated. Structural, HLA, mitochondrial, CYP2D6, and other
 unsupported methods fail closed.
+
+## Family-analysis boundary (M9)
+
+A declared biological-parent edge is metadata evidence, never verified relatedness.
+M9 deterministically compares directly observed M2 calls conditional on those edges.
+Consistency proves neither the pedigree nor disease causality; inconsistency is neither
+a de novo call nor a non-parentage conclusion. Missing and conflicting observations are
+not reference, M6 inferences are excluded, and a unique transmission is site-local—not a
+long-range haplotype or unconditional parent-of-origin assertion. Unsupported biology
+fails closed. See the [exact M9 semantics](family-analysis/segregation-and-transmission.md).

@@ -55,3 +55,11 @@ The pharmacogenomics package validates a local immutable evidence bundle, valida
 an upstream M2 run, creates exact observed-locus evidence, enumerates bounded
 candidate diplotypes, and atomically publishes typed artifacts. Acquisition is
 separate from target analysis; unsupported methods fail closed. See ADR 0011.
+
+## M9 family analysis
+
+M9 adds a strict declared-pedigree boundary, explicit binding to checksum-valid completed
+M2 runs, exact canonical cross-subject alignment, a pure site-transmission enumerator,
+and atomic private evidence publication. Declared relationships, direct observations,
+conditional segregation results, and site-local transmission constraints are separate
+records. No M6 inferred genotype enters this path. See the [M9 model](family-analysis/segregation-and-transmission.md) and [ADR 0013](adr/0013-declared-pedigree-site-transmission.md).

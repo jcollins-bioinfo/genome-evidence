@@ -40,6 +40,8 @@ build/
 *.egg-info/
 .coverage
 /runs/private/
+/inputs/families/
+/runs/m9_family_analysis/
 
 # Private workspace roots and phasing engines/reference artifacts
 /genome-evidence-private/

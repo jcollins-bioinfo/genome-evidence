@@ -20,3 +20,14 @@ M8 target analysis is offline. Keep checked bundles under
 outputs under `runs/m8_pharmacogenomics`. CLI/notebook output is aggregate-first;
 candidate rows remain private. Never transmit genotype rows, manifests, phenotype
 evidence, medication information, or private paths to remote services.
+
+## M9 family descriptors and outputs
+
+Pedigree descriptors and M9 artifacts are private even when identifiers are pseudonymous:
+family structure and linked genotype evidence can be identifying. Keep descriptors under
+private workspace `inputs/families/` and outputs under `runs/m9_family_analysis/`; both
+repository-relative paths are ignored. Files are published with restrictive permissions
+where supported. CLI and routine notebook output contain aggregates, not subjects,
+relationships, variants, or genotypes. Cloud notebooks process data on a cloud-managed
+VM; use local offline execution when that exposure is unacceptable. This is not a claim
+of HIPAA, GDPR, or other regulatory compliance.
